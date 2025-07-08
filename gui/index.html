@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+
+<html>
+
+  <head>
+
+    <title>Pack It 2 Fabric</title>
+
+    <style>
+      body { font-family: sans-serif; padding: 2em; }
+      input { width: 100%; padding: 0.5em; margin-top: 1em; }
+      button { padding: 0.5em 1em; margin-top: 1em; }
+      #status { margin-top: 1em; font-weight: bold; }
+    </style>
+
+  </head>
+  
+  <body>
+    <h1>Pack It 2 Fabric</h1>
+
+    <p>Enter path to .mcaddon file or folder:</p>
+
+    <input type="text" id="filePath" placeholder="C:\\path\\to\\addon.mcaddon" />
+
+    <button id="checkBtn">Check Path</button>
+
+    <div id="status"></div>
+
+    <script>
+      const checkBtn = document.getElementById('checkBtn');
+      const status = document.getElementById('status');
+
+      checkBtn.addEventListener('click', async () => {
+        let filePath = document.getElementById('filePath').value.trim();
+
+        if ((filePath.startsWith('"') && filePath.endsWith('"')) ||
+            (filePath.startsWith("'") && filePath.endsWith("'"))) {
+          filePath = filePath.slice(1, -1);
+        }
+
+        const exists = await window.electronAPI.checkPath(filePath);
+        status.textContent = exists ? '✅ Path exists!' : '❌ Path does not exist.';
+        status.style.color = exists ? 'green' : 'red';
+      });
+    </script>
+    
+  </body>
+</html>
