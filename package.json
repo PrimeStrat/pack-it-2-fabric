@@ -14,7 +14,9 @@
     "adm-zip": "^0.5.16",
     "chalk": "^5.4.1",
     "fs-extra": "^11.3.0",
-    "inquirer": "^12.6.2",
-    "electron": "^36.3.1"
+    "inquirer": "^12.6.2"
+  },
+  "devDependencies": {
+    "electron": "^37.2.0"
   }
 }
