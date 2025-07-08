@@ -2,10 +2,16 @@ const inquirer = require('inquirer');
 const path = require('path');
 const fs = require('fs');
 const extractor = require('./extractor');
+const { generateFabricMod } = require('./generator');
 
 async function runCLI() {
   console.clear();
   console.log(`Welcome to Pack It 2 Fabric!`);
+
+  if (!process.stdin.isTTY) {
+    console.error("\n❌ Error: This CLI requires an interactive terminal (TTY).\nPlease run it in a normal terminal window.");
+    process.exit(1);
+  }
 
   const prompt = inquirer.createPromptModule();
 
@@ -29,6 +35,28 @@ async function runCLI() {
     await extractor.extract(sourcePath, extractPath);
 
     console.log('Extraction complete. Ready for parsing!');
+
+    // Prompt user to continue with generation (yes/y/no/n)
+    const proceedAnswer = await prompt([
+      {
+        type: 'input',
+        name: 'runGenerator',
+        message: 'Would you like to generate the Fabric mod now? (yes/y/no/n):',
+        validate: input => {
+          const val = input.trim().toLowerCase();
+          return ['yes', 'y', 'no', 'n'].includes(val) || 'Please enter yes, y, no, or n.';
+        }
+      }
+    ]);
+
+    const proceed = proceedAnswer.runGenerator.trim().toLowerCase();
+    if (proceed === 'yes' || proceed === 'y') {
+      await generateFabricMod();
+      console.log('Generation complete!');
+    } else {
+      console.log('Generation skipped.');
+    }
+
   } catch (err) {
     if (err.isTtyError) {
       console.error('Prompt couldn’t be rendered in the current environment.');

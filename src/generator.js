@@ -1,9 +1,10 @@
 const fs = require('fs-extra');
 const { exec } = require('child_process');
 const path = require('path');
+const parser = require('./parser');
 
 const ADDON_ASSETS = path.join(__dirname, '..', 'addonAssets', 'main');
-const OUT_DIR = path.join(__dirname, '..', 'fabric_mod');
+const OUT_DIR = path.join(__dirname, '..', 'fabricModAssets');
 
 async function generateFabricMod(MODID = 'converted_mod') {
     await setupGradleProject(MODID);
@@ -91,6 +92,8 @@ async function generateFabricMod(MODID = 'converted_mod') {
 }
 
 async function setupGradleProject(MODID) {
+
+    await fs.ensureDir(OUT_DIR);
     const gradleDir = OUT_DIR;
     // build.gradle
     const buildGradle = `
@@ -195,4 +198,4 @@ function capitalize(str) {
   return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
-generateFabricMod().catch(console.error);
+exports.generateFabricMod = generateFabricMod;
