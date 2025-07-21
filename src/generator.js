@@ -38,7 +38,6 @@ async function generateFabricMod(MODID = 'converted_mod') {
         for (const file of textureFiles) {
             const srcPath = path.join(bedrockTexturesDir, file);
             const destPath = path.join(javaTexturesDir, file);
-            // If you need to convert textures, call parser here. Otherwise, just copy:
             await fs.copy(srcPath, destPath);
         }
         console.log('Copied block textures.');

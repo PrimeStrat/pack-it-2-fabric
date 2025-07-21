@@ -9,7 +9,7 @@ async function runCLI() {
   console.log(`Welcome to Pack It 2 Fabric!`);
 
   if (!process.stdin.isTTY) {
-    console.error("\n❌ Error: This CLI requires an interactive terminal (TTY).\nPlease run it in a normal terminal window.");
+    console.error("\nError: This CLI requires an interactive terminal (TTY).\nPlease run it in a normal terminal window.");
     process.exit(1);
   }
 
