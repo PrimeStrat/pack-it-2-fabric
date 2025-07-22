@@ -15,9 +15,18 @@ async function convertLangFile(langFileContent) {
         if (!line.trim() || line.trim().startsWith('#')) continue;
         const idx = line.indexOf('=');
         if (idx === -1) continue;
+
         let key = line.slice(0, idx).trim();
         let value = line.slice(idx + 1).trim();
-        key = key.replace(/^tile\./, 'block.').replace(/:/, '.').replace(/\.name$/, '');
+
+        if (key.startsWith('tile.')) {
+            key = key.replace(/^tile\./, 'block.');
+        } else if (key.startsWith('item.')) {
+            key = key.replace(/^item\./, 'item.');
+        }
+
+        key = key.replace(/:/g, '.').replace(/\.name$/, ''); // UPDATE KEY NAMES
+
         out[key] = value;
     }
     return out;
