@@ -1,0 +1,13 @@
+{
+  "minecraft:collision_box": "getCollisionShape",
+  "minecraft:geometry": "N/A", 
+  "minecraft:light_dampening": "propagatesSkylightDown",
+  "minecraft:light_emission": "luminance",
+  "minecraft:liquid_detection": [
+    "canFillWithFluid",
+    "receiveFluid"
+  ]
+  "minecraft:material_instances": "N/A", 
+  "minecraft:selection_box": "getOutlineShape",
+  "minecraft:transformation": "N/A" 
+}
