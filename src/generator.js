@@ -3,7 +3,9 @@ const { exec, spawn } = require('child_process');
 const path = require('path');
 const os = require('os');
 const readline = require('readline');
+const glob = require('glob');
 const parser = require('./parser');
+const { generateJavaSources } = require('./java_initializer');
 
 const ADDON_ASSETS = path.join(__dirname, '..', 'addonAssets');
 const OUT_DIR = path.join(__dirname, '..', 'fabricModAssets');
@@ -69,27 +71,39 @@ async function generateFabricMod() {
     }*/
 
     // TEXTURES
-    const javaTexturesDir = path.join(assetsDir, 'textures', 'block');
+    const javaTexturesDir = path.join(assetsDir, 'textures');
+
     if (await fs.pathExists(ADDON_ASSETS)) {
         await fs.ensureDir(javaTexturesDir);
 
-        const textureFiles = await findAllPngTextures(ADDON_ASSETS);
+        // Find all folders named "textures"
+        const texturesDirs = glob.sync('**/textures', {
+            cwd: ADDON_ASSETS,
+            absolute: true,
+            nodir: false
+        });
 
-        if (textureFiles.length === 0) {
-            console.log('No texture files found inside any "textures" folders.');
+        if (texturesDirs.length === 0) {
+            console.log('No "textures" folders found.');
         }
 
-        for (const srcPath of textureFiles) {
-            const relativePath = path.relative(ADDON_ASSETS, srcPath);
-            const destPath = path.join(javaTexturesDir, relativePath);
+        for (const texDir of texturesDirs) {
+            const subdirs = await fs.readdir(texDir);
 
-            await fs.ensureDir(path.dirname(destPath));
-            await fs.copy(srcPath, destPath);
+            for (const sub of subdirs) {
+                const srcSubDir = path.join(texDir, sub);
+                const destSubDir = path.join(javaTexturesDir, sub);
+
+                const stats = await fs.stat(srcSubDir);
+                if (stats.isDirectory()) {
+                    await fs.copy(srcSubDir, destSubDir, { overwrite: true });
+                }
+            }
         }
 
-        console.log('Copied block textures recursively.');
+        console.log('Copied texture folders (block, item, etc.) into "textures".');
     } else {
-        console.log(`No block textures found at ${ADDON_ASSETS}`);
+        console.log(`No textures found at ${ADDON_ASSETS}`);
     }
 
     // TEXTS (LANG FILES)
@@ -116,7 +130,7 @@ async function generateFabricMod() {
     const mcmeta = {
         pack: {
             pack_format: 15,
-            description: 'Converted from Bedrock addonAssets'
+            description: 'Converted using Pack It 2 Fabric'
         }
     };
     await fs.writeJson(path.join(OUT_DIR, 'pack.mcmeta'), mcmeta, { spaces: 2 });
@@ -125,8 +139,8 @@ async function generateFabricMod() {
         schemaVersion: 1,
         id: MODID,
         version: '1.0.0',
-        name: 'Converted Mod',
-        description: 'Converted from Bedrock addonAssets',
+        name: `${MODID} (CONVERTED)`,
+        description: 'Converted using Pack It 2 Fabric',
         authors: ['Auto-generated'],
         contact: {},
         license: 'MIT',
@@ -163,75 +177,19 @@ async function setupGradleProject(MODID) {
     await fs.ensureDir(OUT_DIR);
 
     // Generate build.gradle with selectedVersion
-    const buildGradle = `
-plugins {
-    id 'fabric-loom' version '1.5.4'
-    id 'maven-publish'
-}
+    await generateJavaSources(MODID, OUT_DIR, selectedVersion)
 
-group = 'com.example'
-version = '1.0.0'
-
-repositories {
-    mavenCentral()
-    maven { url = 'https://maven.fabricmc.net/' }
-}
-
-dependencies {
-    minecraft 'com.mojang:minecraft:${selectedVersion}'
-    mappings 'net.fabricmc:yarn:${selectedVersion}+build.10:v2'
-    modImplementation 'net.fabricmc:fabric-loader:0.14.22'
-}
-
-loom {
-    splitEnvironmentSourceSets()
-}
-
-sourceSets {
-    main {
-        java {
-            srcDirs = ['src/main/java']
-        }
-        resources {
-            srcDirs = ['src/main/resources']
+    const settingsGradleContent = `
+    pluginManagement {
+        repositories {
+            gradlePluginPortal()
+            maven { url 'https://maven.fabricmc.net/' }
+            mavenCentral()
         }
     }
-}
-`.trimStart();
+    `.trim();
 
-    const settingsGradle = `
-pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        maven { url = 'https://maven.fabricmc.net/' }
-    }
-}
-
-rootProject.name = '${MODID}'
-`.trimStart();
-
-    await fs.writeFile(path.join(OUT_DIR, 'build.gradle'), buildGradle);
-    await fs.writeFile(path.join(OUT_DIR, 'settings.gradle'), settingsGradle);
-    await fs.writeFile(path.join(OUT_DIR, 'gradle.properties'), 'org.gradle.jvmargs=-Xmx1G\n');
-
-    // Java source
-    const javaDir = path.join(OUT_DIR, 'src', 'main', 'java', 'com', 'example', MODID);
-    await fs.ensureDir(javaDir);
-
-    const modClass = `
-package com.example.${MODID};
-
-import net.fabricmc.api.ModInitializer;
-
-public class ${capitalize(MODID)}Mod implements ModInitializer {
-    @Override
-    public void onInitialize() {
-        System.out.println("Successfully running converted addon as: ${capitalize(MODID)}");
-    }
-}
-`.trimStart();
-
-    await fs.writeFile(path.join(javaDir, `${capitalize(MODID)}Mod.java`), modClass);
+    await fs.writeFile(path.join(OUT_DIR, 'settings.gradle'), settingsGradleContent);
 
     // fabric.mod.json
     const resourcesDir = path.join(OUT_DIR, 'src', 'main', 'resources');
@@ -241,14 +199,14 @@ public class ${capitalize(MODID)}Mod implements ModInitializer {
         schemaVersion: 1,
         id: MODID,
         version: '1.0.0',
-        name: 'Converted Mod',
-        description: 'Converted from Bedrock addonAssets',
+        name: `${MODID} (CONVERTED)`,
+        description: 'Converted using Pack It 2 Fabric',
         authors: ['Auto-generated'],
         contact: {},
         license: 'MIT',
         environment: '*',
         entrypoints: {
-            main: [`com.example.${MODID}.${capitalize(MODID)}Mod`],
+            main: [`com.${MODID}.${MODID}`],
         },
         depends: {
             fabricloader: '>=0.14.0',
@@ -327,7 +285,7 @@ async function installAndBuild() {
 
     try {
         if (!fs.existsSync(gradlewPath)) {
-            console.log('gradlew not found. Trying to generate wrapper...');
+            console.log('Trying to generate wrapper...');
 
             await checkAndMaybeInstallGradle();
 
@@ -453,10 +411,6 @@ async function findLangFiles(dir) {
         }
     }
     return results;
-}
-
-function capitalize(str) {
-    return str.charAt(0).toUpperCase() + str.slice(1);
 }
 
 exports.generateFabricMod = generateFabricMod;
