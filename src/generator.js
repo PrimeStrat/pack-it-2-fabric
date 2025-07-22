@@ -1,10 +1,16 @@
 const fs = require('fs-extra');
 const { exec } = require('child_process');
 const path = require('path');
+const os = require('os');
+const readline = require('readline');
 const parser = require('./parser');
 
 const ADDON_ASSETS = path.join(__dirname, '..', 'addonAssets', 'main');
 const OUT_DIR = path.join(__dirname, '..', 'fabricModAssets');
+
+const SUPPORTED_VERSIONS = [
+    '1.20.1'
+];
 
 async function generateFabricMod(MODID = 'converted_mod') {
     await setupGradleProject(MODID);
@@ -91,106 +97,259 @@ async function generateFabricMod(MODID = 'converted_mod') {
 }
 
 async function setupGradleProject(MODID) {
+    // Pick version
+    console.log('Supported Minecraft versions:');
+    SUPPORTED_VERSIONS.forEach((v, i) => console.log(`${i + 1}. ${v}`));
+  
+    let selectedVersion;
+    while (!selectedVersion) {
+        const answer = await promptUser('Select Minecraft version by number: ');
+        const idx = parseInt(answer, 10) - 1;
+        if (idx >= 0 && idx < SUPPORTED_VERSIONS.length) {
+            selectedVersion = SUPPORTED_VERSIONS[idx];
+        } else {
+            console.log('Invalid selection, please try again.');
+        }
+    }
 
+    async function promptUser(question) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+         });
+        return new Promise((resolve) => {
+        rl.question(question, (answer) => {
+                rl.close();
+                resolve(answer.trim());
+            });
+        });
+      }
+  
     await fs.ensureDir(OUT_DIR);
-    const gradleDir = OUT_DIR;
-    // build.gradle
+  
+    // Generate build.gradle with selectedVersion
     const buildGradle = `
-    plugins {
-        id 'fabric-loom' version '1.6-SNAPSHOT'
-        id 'maven-publish'
-    }
-
-    group = 'com.example'
-    version = '1.0.0'
-
-    repositories {
-        mavenCentral()
-        maven { url = 'https://maven.fabricmc.net/' }
-    }
-
-    dependencies {
-        minecraft 'com.mojang:minecraft:1.20.1'
-        mappings 'net.fabricmc:yarn:1.20.1+build.10:v2'
-        modImplementation 'net.fabricmc:fabric-loader:0.14.22'
-    }
-
-    loom {
-        splitEnvironmentSourceSets()
-    }
-
-    sourceSets {
-        main {
-            java {
-                srcDirs = ['src/main/java']
-            }
-            resources {
-                srcDirs = ['src/main/resources']
+        plugins {
+            id 'fabric-loom' version '1.5.4'
+            id 'maven-publish'
+        }
+        
+        group = 'com.example'
+        version = '1.0.0'
+        
+        repositories {
+            mavenCentral()
+            maven { url = 'https://maven.fabricmc.net/' }
+        }
+        
+        dependencies {
+            minecraft 'com.mojang:minecraft:${selectedVersion}'
+            mappings 'net.fabricmc:yarn:${selectedVersion}+build.10:v2'
+            modImplementation 'net.fabricmc:fabric-loader:0.14.22'
+        }
+        
+        loom {
+            splitEnvironmentSourceSets()
+        }
+        
+        sourceSets {
+            main {
+                java {
+                    srcDirs = ['src/main/java']
+                }
+                resources {
+                    srcDirs = ['src/main/resources']
+                }
             }
         }
-    }
-    `;
-    await fs.writeFile(path.join(gradleDir, 'build.gradle'), buildGradle);
+  `.trimStart();
 
-    // settings.gradle
-    await fs.writeFile(path.join(gradleDir, 'settings.gradle'), `rootProject.name = '${MODID}'\n`);
+  const settingsGradle = `
+        pluginManagement {
+            repositories {
+                gradlePluginPortal()
+                maven { url = 'https://maven.fabricmc.net/' }
+            }
+        }
 
-    // gradle.properties
-    await fs.writeFile(path.join(gradleDir, 'gradle.properties'), `org.gradle.jvmargs=-Xmx1G\n`);
-
-    // Minimal mod class
-    const javaDir = path.join(gradleDir, 'src', 'main', 'java', 'com', 'example', MODID);
+        rootProject.name = '${MODID}'
+    `.trimStart();
+  
+    await fs.writeFile(path.join(OUT_DIR, 'build.gradle'), buildGradle);
+    await fs.writeFile(path.join(OUT_DIR, 'settings.gradle'), settingsGradle);
+    await fs.writeFile(path.join(OUT_DIR, 'gradle.properties'), 'org.gradle.jvmargs=-Xmx1G\n');
+  
+    // Java source
+    const javaDir = path.join(OUT_DIR, 'src', 'main', 'java', 'com', 'example', MODID);
     await fs.ensureDir(javaDir);
+  
     const modClass = `
-    package com.example.${MODID};
-
-    import net.fabricmc.api.ModInitializer;
-
-    public class ${capitalize(MODID)}Mod implements ModInitializer {
-        @Override
-        public void onInitialize() {
-            System.out.println("Hello Fabric world!");
+        package com.example.${MODID};
+        
+        import net.fabricmc.api.ModInitializer;
+        
+        public class ${capitalize(MODID)}Mod implements ModInitializer {
+            @Override
+            public void onInitialize() {
+                System.out.println("Successfully running converted addon as: ${capitalize(MODID)}");
+            }
         }
-    }
-    `;
+  `.trimStart();
+  
     await fs.writeFile(path.join(javaDir, `${capitalize(MODID)}Mod.java`), modClass);
-
-    // Minimal fabric.mod.json in resources
-    const resourcesDir = path.join(gradleDir, 'src', 'main', 'resources');
+  
+    // fabric.mod.json
+    const resourcesDir = path.join(OUT_DIR, 'src', 'main', 'resources');
     await fs.ensureDir(resourcesDir);
-    await fs.writeJson(path.join(resourcesDir, 'fabric.mod.json'), {
+  
+    const fabricModJson = {
         schemaVersion: 1,
         id: MODID,
-        version: "1.0.0",
-        name: "Converted Mod",
-        description: "Converted from Bedrock addonAssets",
-        authors: ["Auto-generated"],
+        version: '1.0.0',
+        name: 'Converted Mod',
+        description: 'Converted from Bedrock addonAssets',
+        authors: ['Auto-generated'],
         contact: {},
-        license: "MIT",
-        environment: "*",
+        license: 'MIT',
+        environment: '*',
         entrypoints: {
-        main: [`com.example.${MODID}.${capitalize(MODID)}Mod`]
+            main: [`com.example.${MODID}.${capitalize(MODID)}Mod`],
         },
         depends: {
-        "fabricloader": ">=0.14.0",
-        "minecraft": ">=1.20.0"
-        }
-    }, { spaces: 2 });
+            fabricloader: '>=0.14.0',
+            minecraft: `>=${selectedVersion}`,
+        },
+    };
+  
+    await fs.writeJson(path.join(resourcesDir, 'fabric.mod.json'), fabricModJson, { spaces: 2 });
+  
+    console.log(`Setup complete! Using Minecraft version: ${selectedVersion}`);
 }
 
 async function installAndBuild() {
-  // Run gradle wrapper and build
-  return new Promise((resolve, reject) => {
-    exec('gradlew build', { cwd: OUT_DIR }, (error, stdout, stderr) => {
-      if (error) {
-        console.error(`Build error: ${stderr}`);
-        reject(error);
-      } else {
-        console.log(stdout);
-        resolve();
+    function promptUser(question) {
+        const rl = readline.createInterface({
+            input: process.stdin,
+            output: process.stdout,
+        });
+        return new Promise((resolve) => {
+            rl.question(question, (answer) => {
+                rl.close();
+                resolve(answer.trim().toLowerCase());
+            });
+        });
+    }
+  
+    async function installGradle() {
+        const platform = os.platform();
+        console.log(`Attempting to install Gradle on ${platform}...`);
+      
+        return new Promise((resolve, reject) => {
+            let cmd;
+            let args;
+        
+            if (platform === 'darwin') {
+                cmd = 'brew';
+                args = ['install', 'gradle'];
+            } else if (platform === 'linux') {
+                cmd = 'sudo';
+                args = ['apt', 'install', '-y', 'gradle'];
+            } else if (platform === 'win32') {
+                cmd = 'choco';
+                args = ['install', 'gradle', '-y'];
+            } else {
+                return reject(new Error(`Unsupported platform: ${platform}`));
+            }
+        
+            const installer = spawn(cmd, args, { stdio: 'inherit' });
+        
+            installer.on('close', (code) => {
+                if (code === 0) {
+                    resolve();
+                } else {
+                    reject(new Error(`${cmd} exited with code ${code}`));
+                }
+            });
+        
+            installer.on('error', (err) => {
+                reject(err);
+            });
+        });
+    }
+  
+    async function checkAndMaybeInstallGradle() {
+        return new Promise((resolve, reject) => {
+            exec('gradle -v', async (error) => {
+                if (!error) {
+                    console.log('Gradle is already installed.');
+                    return resolve();
+                }
+        
+                console.warn('Gradle is not installed on your system.');
+                const answer = await promptUser('Would you like to install Gradle now? (y/n): ');
+                if (answer === 'y' || answer === 'yes') {
+                    try {
+                        await installGradle();
+                        resolve();
+                    } catch (err) {
+                        reject(err);
+                    }
+                } else {
+                    reject(new Error('Gradle is required but not installed.'));
+                }
+            });
+        });
+    }
+  
+    const gradlewPath = path.join(OUT_DIR, 'gradlew');
+  
+    try {
+      if (!fs.existsSync(gradlewPath)) {
+            console.log('gradlew not found. Trying to generate wrapper...');
+    
+            await checkAndMaybeInstallGradle();
+    
+            // Generate wrapper
+            await new Promise((resolve, reject) => {
+                exec('gradle wrapper', { cwd: OUT_DIR }, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error('Failed to generate gradlew:', stderr);
+                        return reject(error);
+                    }
+                    console.log('gradlew generated successfully.');
+                    resolve();
+                });
+            });
       }
-    });
-  });
+  
+      // Make gradlew executable (on Unix)
+      if (os.platform() !== 'win32') {
+            await new Promise((resolve, reject) => {
+                exec('chmod +x gradlew', { cwd: OUT_DIR }, (error) => {
+                    if (error) return reject(`chmod failed: ${error}`);
+                    resolve();
+                });
+            });
+      }
+  
+      // Run build
+      await new Promise((resolve, reject) => {
+        const buildCmd = os.platform() === 'win32' ? 'gradlew.bat build' : './gradlew build';
+            exec(buildCmd, { cwd: OUT_DIR }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Build error:\n${stderr}`);
+                    return reject(error);
+                }
+                console.log(stdout);
+                resolve();
+            });
+        });
+    
+        console.log('Build complete.');
+    } catch (err) {
+        console.error('An error occurred:', err.message || err);
+        process.exit(1);
+    }
 }
 
 function capitalize(str) {
