@@ -12,7 +12,23 @@ const SUPPORTED_VERSIONS = [
     '1.20.1'
 ];
 
-async function generateFabricMod(MODID = 'converted_mod') {
+async function generateFabricMod() {
+
+    const modIdPattern = /^[a-zA-Z]+$/;
+    MODID = null
+
+    while (MODID == null) {
+        const input = await promptUser(
+            "Enter the mod ID (only letters, one word, no numbers or symbols): "
+        );
+
+        if (modIdPattern.test(input)) {
+            MODID = input.toLowerCase();
+        } else {
+            console.log("Invalid mod ID. Please use only letters (a-z or A-Z), no numbers, symbols, or spaces.");
+        }
+    }
+
     await setupGradleProject(MODID);
     console.log('Gradle project files generated.');
 
@@ -111,19 +127,6 @@ async function setupGradleProject(MODID) {
             console.log('Invalid selection, please try again.');
         }
     }
-
-    async function promptUser(question) {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-         });
-        return new Promise((resolve) => {
-        rl.question(question, (answer) => {
-                rl.close();
-                resolve(answer.trim());
-            });
-        });
-      }
   
     await fs.ensureDir(OUT_DIR);
   
@@ -227,18 +230,6 @@ async function setupGradleProject(MODID) {
 }
 
 async function installAndBuild() {
-    function promptUser(question) {
-        const rl = readline.createInterface({
-            input: process.stdin,
-            output: process.stdout,
-        });
-        return new Promise((resolve) => {
-            rl.question(question, (answer) => {
-                rl.close();
-                resolve(answer.trim().toLowerCase());
-            });
-        });
-    }
   
     async function installGradle() {
         const platform = os.platform();
@@ -350,6 +341,19 @@ async function installAndBuild() {
         console.error('An error occurred:', err.message || err);
         process.exit(1);
     }
+}
+
+async function promptUser(question) {
+    const rl = readline.createInterface({
+        input: process.stdin,
+        output: process.stdout,
+     });
+    return new Promise((resolve) => {
+    rl.question(question, (answer) => {
+            rl.close();
+            resolve(answer.trim());
+        });
+    });
 }
 
 function capitalize(str) {
