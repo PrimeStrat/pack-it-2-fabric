@@ -1,14 +1,14 @@
-async function convertBlockModel(bedrockModelJson) {
-    // TODO: Implement actual conversion logic
+// Handles conversion of block models
+async function convertBlockModel(bedrockBlockModelJson) {
+    let javaBlockModelJson;
     
     
 
-    return bedrockModelJson;
+    return javaBlockModelJson;
 }
 
-// Converts a Bedrock .lang file (string) to a Java lang .json object
+// Handles conversion of lang files
 async function convertLangFile(langFileContent) {
-    // Simple Bedrock .lang to Java .json lang conversion
     const lines = langFileContent.split('\n');
     const out = {};
     for (const line of lines) {
@@ -21,6 +21,35 @@ async function convertLangFile(langFileContent) {
         out[key] = value;
     }
     return out;
+}
+
+// Handles conversion of items
+async function createItem(bedrockItemJson) {
+
+}
+
+// Generates all files related to custom walls & pillars
+function generateWallModel(javaBlockModelJson) {
+
+}
+
+// Generates all files related to custom slabs
+function generateSlabModel(javaBlockModelJson) {
+    
+}
+
+// NOTES
+// Generates all files related to custom blocks (excluding walls, pillars, and slabs)
+// Handles stairs as well as all blocks with custom geometry
+// Due to Bedrock lacking stair geometry and almost all geos can be converted 
+// this function will handle the conversion of most geometry related changes.
+function generateBlockModel(javaBlockModelJson) {
+    
+}
+
+// Universal function that generates th item for each custom block
+function createBlockItem(javaBlockModelJson) {
+
 }
 
 module.exports = {
