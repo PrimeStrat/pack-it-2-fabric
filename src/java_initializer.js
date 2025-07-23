@@ -20,7 +20,7 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
 
-    let blockListJavaFile = generateBlockListJavaFile(MODID, basePackage, blockList)
+    let blockListJavaFile = generateBlockListJavaFile(blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile)
 
     await writeBuildGradle(MODID, basePackage, OUT_DIR, VER)
@@ -50,11 +50,16 @@ plugins {
 }
 
 group = '${basePackage}'
-version = '3.0.1' // You can make this dynamic if needed
+version = '1.0.0'
 
 repositories {
     mavenCentral()
-    maven { url 'https://maven.fabricmc.net/' }
+    maven { url "https://maven.tomalbrc.de" }
+    //maven { url 'https://maven.fabricmc.net/' }
+}
+
+fabricApi {
+    configureDataGeneration()
 }
 
 dependencies {
@@ -64,25 +69,41 @@ dependencies {
     modImplementation 'net.fabricmc.fabric-api:fabric-api:${fabricApiVersion}'
 }
 
-sourceCompatibility = JavaVersion.VERSION_17
-targetCompatibility = JavaVersion.VERSION_17
+def dataOutput = 'src/main/generated'
 
-jar {
-    from('LICENSE') {
-        rename { "LICENSE_${MODID}" }
-    }
-    manifest {
-        attributes(
-            'Specification-Title': '${MODID}',
-            'Specification-Vendor': 'example',
-            'Specification-Version': '1',
-            'Implementation-Title': '${MODID}',
-            'Implementation-Version': project.version,
-            'Implementation-Vendor': 'example',
-            'Implementation-Timestamp': new Date().format("yyyy-MM-dd'T'HH:mm:ssZ")
-        )
+sourceSets {
+    main {
+        java {
+            srcDirs = ['src/main/java']
+        }
+        resources {
+            srcDirs = ['src/main/resources', 'src/main/generated']
+        }
     }
 }
+
+tasks.withType(JavaCompile).configureEach {
+    it.options.release = 17
+}
+
+java {
+    withSourcesJar()
+
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+    from sourceSets.main.output
+}
+
+task printSourceSets {
+    doLast {
+        println "Java source dirs: " + sourceSets.main.java.srcDirs
+        println "Resource dirs: " + sourceSets.main.resources.srcDirs
+    }
+}
+
 `;
 
     await fs.writeFile(path.join(OUT_DIR, 'build.gradle'), gradleContent);
@@ -113,7 +134,7 @@ public class ${MODID.toUpperCase()} implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        List<String> blocks = block.ModBlockList.BLOCK_LIST;
+        List<String> blocks = ModBlockList.BLOCK_LIST;
         ModItems.registerModItems();
         ModItemGroups.registerItemGroups();
         if (blocks != null) {
@@ -205,8 +226,7 @@ public class ModItemGroups {
             FabricItemGroup.builder().displayName(Text.translatable("${upper}"))
                             .icon(() -> new ItemStack(ModBlocks.${upper}_BLOCKS.get(0))).entries((displayContext, entries) -> {
                                 for(int i = 0; i < ModBlocks.${upper}_BLOCKS.size(); i++) {
-                                    regInt = i;
-                                    entries.add(ModBlocks.${upper}_BLOCKS.get(regInt));
+                                    entries.add(ModBlocks.${upper}_BLOCKS.get(i));
                                 }
                             }).build());
     }
@@ -353,14 +373,14 @@ public class ModBlockModel extends FacingBlock {
  * @param {String[]} blockIds - Array of block ID strings (e.g. ["mymod:stone", "mymod:glow_dirt"])
  * @returns {String} - Java file content
  */
-function generateBlockListJavaFile(MODID, basePackage, blockIds) {
+function generateBlockListJavaFile(blockIds) {
     const escapedIds = blockIds.map(id => `        "${id}"`).join(',\n') || `"wmct:test"`;
 
     return `
 import java.util.List;
 import java.util.Arrays;
 
-public class ${MODID.toUpperCase()} {
+public class ModBlockList {
 
     public static final List<String> BLOCK_LIST = Arrays.asList(
 ${escapedIds}

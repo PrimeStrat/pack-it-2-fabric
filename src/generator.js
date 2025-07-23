@@ -145,7 +145,9 @@ async function generateFabricMod() {
         contact: {},
         license: 'MIT',
         environment: '*',
-        entrypoints: {},
+        entrypoints: {
+            "main": [`com.${MODID}.${MODID.toUpperCase()}`]
+        },
         depends: {
             fabricloader: '>=0.14.0',
             minecraft: '>=1.20.0'
@@ -155,7 +157,7 @@ async function generateFabricMod() {
 
     console.log('Fabric mod structure generated at:', OUT_DIR);
 
-    await installAndBuild();
+    await installAndBuild(MODID);
 }
 
 async function setupGradleProject(MODID) {
@@ -180,11 +182,14 @@ async function setupGradleProject(MODID) {
     await generateJavaSources(MODID, OUT_DIR, selectedVersion)
 
     const settingsGradleContent = `
-    pluginManagement {
+        pluginManagement {
         repositories {
-            gradlePluginPortal()
-            maven { url 'https://maven.fabricmc.net/' }
+            maven {
+                name = 'Fabric'
+                url = 'https://maven.fabricmc.net/'
+            }
             mavenCentral()
+            gradlePluginPortal()
         }
     }
     `.trim();
@@ -197,29 +202,41 @@ async function setupGradleProject(MODID) {
 
     const fabricModJson = {
         schemaVersion: 1,
-        id: MODID,
-        version: '1.0.0',
-        name: `${MODID} (CONVERTED)`,
-        description: 'Converted using Pack It 2 Fabric',
+        id: MODID.toLowerCase(),  
+        version: '1.0.0',         
+        name: MODID.toUpperCase(), 
+        description: `Converted using Pack It 2 Fabric for ${MODID}`,
         authors: ['Auto-generated'],
-        contact: {},
-        license: 'MIT',
-        environment: '*',
+        contact: {
+            homepage: "",
+            sources: ""
+        },
+        license: "MIT", 
+        icon: "*",
+        environment: "*",
         entrypoints: {
-            main: [`com.${MODID}.${MODID}`],
+            main: [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}`],
+            "fabric-datagen": [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}DataGenerator`],
+            client: [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}Client`]
         },
+        mixins: [`${MODID.toLowerCase()}.mixins.json`],
         depends: {
-            fabricloader: '>=0.14.0',
-            minecraft: `>=${selectedVersion}`,
+            fabricloader: ">=0.15.0",
+            minecraft: "~1.20.1",
+            java: ">=17",
+            "fabric-api": "*"
         },
-    };
+        suggests: {
+            "another-mod": "*"
+        }
+        };
 
     await fs.writeJson(path.join(resourcesDir, 'fabric.mod.json'), fabricModJson, { spaces: 2 });
 
     console.log(`Setup complete! Using Minecraft version: ${selectedVersion}`);
 }
 
-async function installAndBuild() {
+async function installAndBuild(MODID) {
     async function installGradle() {
         const platform = os.platform();
         console.log(`Attempting to install Gradle on ${platform}...`);
@@ -314,7 +331,7 @@ async function installAndBuild() {
 
         // Run build
         await new Promise((resolve, reject) => {
-            const buildCmd = os.platform() === 'win32' ? 'gradlew.bat build' : './gradlew build';
+            const buildCmd = os.platform() === 'win32' ? 'gradlew.bat build' : './gradlew clean build';
             exec(buildCmd, { cwd: OUT_DIR }, (error, stdout, stderr) => {
                 if (error) {
                     console.error(`Build error:\n${stderr}`);
@@ -330,6 +347,46 @@ async function installAndBuild() {
         console.error('An error occurred:', err.message || err);
         process.exit(1);
     }
+
+    outputMod(MODID)
+}
+
+async function outputMod(MODID){
+    const OUT_DIR = path.resolve(__dirname, '../fabricModAssets'); 
+    const libsDir = path.join(OUT_DIR, 'build', 'libs');
+
+    if (!fs.existsSync(libsDir)) {
+        console.error('Build/libs folder does not exist.');
+        return;
+    }
+
+    const files = fs.readdirSync(libsDir);
+    const jarFile = files.find(file =>
+        file.endsWith('.jar') &&
+        !file.includes('-sources') &&
+        !file.includes('-dev')
+    );
+
+    if (!jarFile) {
+        console.error('No .jar file found in build/libs.');
+        return;
+    }
+
+    const newJarName = `${MODID}.jar`;
+    const oldJarPath = path.join(libsDir, jarFile);
+
+    const targetDir = await promptUser('Enter the full path of the directory to output the .jar file to: ');
+    const resolvedTargetDir = path.resolve(targetDir);
+
+    if (!fs.existsSync(resolvedTargetDir)) {
+        console.error('Target directory does not exist.');
+        return;
+    }
+
+    const newJarPath = path.join(resolvedTargetDir, newJarName);
+
+    fs.copyFileSync(oldJarPath, newJarPath);
+    console.log(`Bedrock Addon was converted to: ${newJarPath}`);
 }
 
 async function promptUser(question) {
