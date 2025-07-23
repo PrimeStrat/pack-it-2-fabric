@@ -72,7 +72,6 @@ async function generateFabricMod() {
 
     // TEXTURES
     const javaTexturesDir = path.join(assetsDir, 'textures');
-
     if (await fs.pathExists(ADDON_ASSETS)) {
         await fs.ensureDir(javaTexturesDir);
 
@@ -126,7 +125,7 @@ async function generateFabricMod() {
         console.log(`No lang files found at ${ADDON_ASSETS}`);
     }
 
-    // --- PACK META & MOD META ---
+    // PACK META & MOD META
     const mcmeta = {
         pack: {
             pack_format: 15,
@@ -417,43 +416,6 @@ async function findBlockModelFolders(rootDir) {
         }
     }
     return blockFolders;
-}
-
-async function findAllPngTextures(rootDir) {
-    const results = [];
-
-    async function recurse(currentDir) {
-        const entries = await fs.readdir(currentDir, { withFileTypes: true });
-
-        for (const entry of entries) {
-            const fullPath = path.join(currentDir, entry.name);
-
-            if (entry.isDirectory()) {
-                if (entry.name.toLowerCase() === 'textures') {
-                    await collectPngs(fullPath);
-                } else {
-                    await recurse(fullPath);
-                }
-            }
-        }
-    }
-
-    async function collectPngs(dir) {
-        const entries = await fs.readdir(dir, { withFileTypes: true });
-
-        for (const entry of entries) {
-            const fullPath = path.join(dir, entry.name);
-
-            if (entry.isDirectory()) {
-                await collectPngs(fullPath);
-            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.png')) {
-                results.push(fullPath);
-            }
-        }
-    }
-
-    await recurse(rootDir);
-    return results;
 }
 
 async function findLangFiles(dir) {
