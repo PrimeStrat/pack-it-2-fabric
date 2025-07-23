@@ -1,3 +1,4 @@
 /node_modules
 /addonAssets
 /fabricModAssets
+.vscode/settings.json
