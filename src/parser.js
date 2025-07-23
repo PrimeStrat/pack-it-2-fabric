@@ -1,3 +1,5 @@
+let blockList = []
+
 // Handles conversion of block models
 async function convertBlockModel(bedrockBlockModelJson) {
     let javaBlockModelJson;
@@ -63,5 +65,6 @@ function createBlockItem(javaBlockModelJson) {
 
 module.exports = {
     convertBlockModel,
-    convertLangFile
+    convertLangFile,
+    blockList
 };
