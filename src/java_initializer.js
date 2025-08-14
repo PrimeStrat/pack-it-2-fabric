@@ -374,21 +374,24 @@ public class ModBlockModel extends FacingBlock {
  * @returns {String} - Java file content
  */
 function generateBlockListJavaFile(blockIds) {
-    const escapedIds = blockIds.map(id => `        "${id}"`).join(',\n') || `"wmct:test"`;
-
+    let listContent = "";
+    
+    if (blockIds.length > 0) {
+        const escapedIds = blockIds.map(id => `        "${id}"`).join(',\n');
+        listContent = `\n${escapedIds}\n    `;
+    }
+    
     return `
 import java.util.List;
 import java.util.Arrays;
 
 public class ModBlockList {
-
-    public static final List<String> BLOCK_LIST = Arrays.asList(
-${escapedIds}
-    );
+    public static final List<String> BLOCK_LIST = Arrays.asList(${listContent});
 }
 `.trim();
 }
 
 module.exports = {
-    generateJavaSources
+    generateBlockListJavaFile, generateJavaSources
 };
+

@@ -38,7 +38,7 @@ async function generateFabricMod() {
     await fs.ensureDir(assetsDir);
 
     // BLOCK MODELS
-    /*const javaModelsDir = path.join(assetsDir, 'models', 'block');
+    const javaModelsDir = path.join(assetsDir, 'models');
     if (await fs.pathExists(ADDON_ASSETS)) {
         await fs.ensureDir(javaModelsDir);
 
@@ -48,27 +48,15 @@ async function generateFabricMod() {
             console.log('No "blocks" folders found inside models.');
         }
 
-        for (const folder of blockFolders) {
-            const modelFiles = await fs.readdir(folder);
-            for (const file of modelFiles) {
-                if (!file.endsWith('.json')) continue;
-                const srcPath = path.join(folder, file);
-
-                const relativePath = path.relative(ADDON_ASSETS, srcPath);
-                const destPath = path.join(javaModelsDir, relativePath);
-
-                await fs.ensureDir(path.dirname(destPath));
-
-                const bedrockJson = await fs.readJson(srcPath);
-                const converted = await parser.convertBlockModel(bedrockJson);
-                await fs.writeJson(destPath, converted, { spaces: 2 });
-            }
+        const blocksMap = await collectBedrockBlocks(ADDON_ASSETS);
+        for (const [blockId, blockEntry] of Object.entries(blocksMap)) {
+            await parser.convertBlockModel(blockEntry, assetsDir, MODID);
         }
 
         console.log('Converted and copied block models recursively.');
     } else {
         console.log(`No block models found at ${ADDON_ASSETS}`);
-    }*/
+    }
 
     // TEXTURES
     const javaTexturesDir = path.join(assetsDir, 'textures');
@@ -402,11 +390,62 @@ async function promptUser(question) {
 }
 
 // Search functions
+async function collectBedrockBlocks(ADDON_ASSETS) {
+    const blocksData = {}; // { blockId: { blockJson, geoJson } }
+
+    const javaModelsDir = path.join(ADDON_ASSETS, 'models');
+
+    if (!(await fs.pathExists(ADDON_ASSETS))) {
+        console.log(`No block models found at ${ADDON_ASSETS}`);
+        return blocksData;
+    }
+
+    const blockFolders = await findBlockModelFolders(ADDON_ASSETS);
+
+    if (blockFolders.length === 0) {
+        console.log('No "blocks" folders found inside models.');
+        return blocksData;
+    }
+
+    for (const folder of blockFolders) {
+        const modelFiles = await fs.readdir(folder);
+
+        for (const file of modelFiles) {
+            if (!file.endsWith('.json')) continue;
+
+            const fullPath = path.join(folder, file);
+            const jsonData = await fs.readJson(fullPath);
+
+            if (file.endsWith('.geo.json')) {
+                // Geometry file
+                const geoName = path.basename(file, '.geo.json');
+                blocksData[geoName] = blocksData[geoName] || {};
+                blocksData[geoName].geoJson = jsonData;
+            } else {
+                // Block JSON file
+                const blockId = jsonData?.description?.identifier || path.basename(file, '.json');
+                blocksData[blockId] = blocksData[blockId] || {};
+                blocksData[blockId].blockJson = jsonData;
+
+                // Map geometry reference if present
+                if (jsonData?.components?.['minecraft:geometry']) {
+                    const geoRef = jsonData.components['minecraft:geometry'];
+                    blocksData[blockId].geometryRef = geoRef;
+                }
+            }
+        }
+    }
+
+    return blocksData;
+}
+
 async function findBlockModelFolders(rootDir) {
     let blockFolders = [];
     const entries = await fs.readdir(rootDir, { withFileTypes: true });
+
     for (const entry of entries) {
         const fullPath = path.join(rootDir, entry.name);
+
         if (entry.isDirectory()) {
             if (entry.name.toLowerCase() === 'blocks') {
                 blockFolders.push(fullPath);
@@ -415,6 +454,7 @@ async function findBlockModelFolders(rootDir) {
             blockFolders = blockFolders.concat(nested);
         }
     }
+
     return blockFolders;
 }
 
