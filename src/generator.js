@@ -14,6 +14,8 @@ const SUPPORTED_VERSIONS = [
     '1.20.1'
 ];
 
+let selectedVersion;
+
 async function generateFabricMod() {
     const modIdPattern = /^[a-zA-Z]+$/;
     let MODID = null;
@@ -50,7 +52,7 @@ async function generateFabricMod() {
 
         const blocksMap = await collectBedrockBlocks(ADDON_ASSETS);
         for (const [blockId, blockEntry] of Object.entries(blocksMap)) {
-            await parser.convertBlockModel(blockEntry, assetsDir, MODID);
+            await parser.convertBlockModel(blockEntry, assetsDir, MODID, selectedVersion);
         }
 
         console.log('Converted and copied block models recursively.');
@@ -152,7 +154,6 @@ async function setupGradleProject(MODID) {
     console.log('Supported Minecraft versions:');
     SUPPORTED_VERSIONS.forEach((v, i) => console.log(`${i + 1}. ${v}`));
 
-    let selectedVersion;
     while (!selectedVersion) {
         const answer = await promptUser('Select Minecraft version by number: ');
         const idx = parseInt(answer, 10) - 1;
@@ -391,51 +392,68 @@ async function promptUser(question) {
 
 // Search functions
 async function collectBedrockBlocks(ADDON_ASSETS) {
-    const blocksData = {}; // { blockId: { blockJson, geoJson } }
-
-    const javaModelsDir = path.join(ADDON_ASSETS, 'models');
-
-    if (!(await fs.pathExists(ADDON_ASSETS))) {
-        console.log(`No block models found at ${ADDON_ASSETS}`);
-        return blocksData;
-    }
+    const blocksData = {}; // { blockId: { blockJson, geometryRef, geoJson } }
+    const geometryMap = {}; // geometryIdentifier -> geoJson
 
     const blockFolders = await findBlockModelFolders(ADDON_ASSETS);
-
     if (blockFolders.length === 0) {
-        console.log('No "blocks" folders found inside models.');
+        console.warn(`No block model folders found in ${ADDON_ASSETS}`);
         return blocksData;
     }
 
     for (const folder of blockFolders) {
-        const modelFiles = await fs.readdir(folder);
+        console.log(`Scanning folder: ${folder}`);
+        const files = await fs.readdir(folder);
 
-        for (const file of modelFiles) {
+        for (const file of files) {
             if (!file.endsWith('.json')) continue;
-
             const fullPath = path.join(folder, file);
-            const jsonData = await fs.readJson(fullPath);
+            let jsonData;
+            try {
+                jsonData = await fs.readJson(fullPath);
+            } catch (err) {
+                console.warn(`Failed to read JSON file: ${fullPath}`, err);
+                continue;
+            }
 
-            if (file.endsWith('.geo.json')) {
-                // Geometry file
-                const geoName = path.basename(file, '.geo.json');
-                blocksData[geoName] = blocksData[geoName] || {};
-                blocksData[geoName].geoJson = jsonData;
-            } else {
-                // Block JSON file
-                const blockId = jsonData?.description?.identifier || path.basename(file, '.json');
-                blocksData[blockId] = blocksData[blockId] || {};
-                blocksData[blockId].blockJson = jsonData;
+            // Detect geometry JSON by content, not filename
+            const geoArray = jsonData['minecraft:geometry'];
+            if (Array.isArray(geoArray) && geoArray[0]?.description?.identifier?.startsWith("geometry")) {
+                const geoIdentifier = geoArray[0].description.identifier;
+                geometryMap[geoIdentifier] = jsonData;
+                continue; // skip adding to blocksData
+            }
 
-                // Map geometry reference if present
-                if (jsonData?.components?.['minecraft:geometry']) {
-                    const geoRef = jsonData.components['minecraft:geometry'];
-                    blocksData[blockId].geometryRef = geoRef;
-                }
+            // Otherwise, treat as block JSON
+            const blockId = jsonData?.description?.identifier || path.basename(file, '.json');
+            blocksData[blockId] = blocksData[blockId] || {};
+            blocksData[blockId].blockJson = jsonData;
+
+            const geometryRef = jsonData?.components?.['minecraft:geometry'];
+            if (geometryRef) {
+                blocksData[blockId].geometryRef = geometryRef;
             }
         }
     }
 
+    // Attach the correct geoJson for each block
+    for (const [blockId, entry] of Object.entries(blocksData)) {
+        const blockComponents = entry.blockJson?.["minecraft:block"]?.components;
+        let geometryName = blockComponents?.["minecraft:geometry"] || entry.geometryRef;
+
+        // Fallback to default geometry if none exists
+        if (!geometryName) {
+            geometryName = "geometry.block";
+        }
+
+        if (geometryMap[geometryName]) {
+            entry.geoJson = geometryMap[geometryName];
+        } else {
+            entry.geoJson = null;
+        }
+    }
+
+    console.log(`Collected ${Object.keys(blocksData).length} blocks and ${Object.keys(geometryMap).length} geometries`);
     return blocksData;
 }
 
