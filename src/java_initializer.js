@@ -16,7 +16,7 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItems`, ModItems)
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItemGroups`, ModItemGroups)
 
-    let { ModBlocks, ModBlockModel } = generateBlockHandler(MODID, basePackage)
+    let { ModBlocks, ModBlockModel } = generateBlockHandler(MODID, basePackage, blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
 
@@ -157,7 +157,7 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap;
 import net.minecraft.client.render.RenderLayer;
 
-public class WMCTClient implements ClientModInitializer {
+public class ${MODID.toUpperCase()}Client implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         ModBlocks.${MODID.toUpperCase()}_BLOCKS.forEach(block -> {
@@ -255,7 +255,6 @@ import net.fabricmc.fabric.api.item.v1.FabricItemSettings;
 import net.fabricmc.fabric.api.object.builder.v1.block.FabricBlockSettings;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
-import net.minecraft.block.PillarBlock;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;

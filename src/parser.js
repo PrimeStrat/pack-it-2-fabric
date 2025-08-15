@@ -25,7 +25,6 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
 
     const entryForGeneration = {
         id: identifier,
-        blockData,
         geometryRef,
         geoJson,
         material_instances: components['minecraft:material_instances'] || {}
@@ -77,17 +76,7 @@ async function createItem(bedrockItemJson) {
 
 }
 
-// Generates all files related to custom walls & pillars
-function generateWallModel(javaBlockModelJson) {
-
-}
-
-// Generates all files related to custom slabs
-function generateSlabModel(javaBlockModelJson) {
-    
-}
-
-// Universal function that generates th item for each custom block
+// Universal function that generates the item for each custom block
 function createBlockItem(javaBlockModelJson) {
 
 }
@@ -117,7 +106,7 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     // Convert geometry
     let blockJson;
     if (blockEntry.geoJson && blockEntry.geometryRef) {
-        blockJson = await convertBedrockGeometryToJava(blockEntry.blockData, blockEntry.geoJson, textures);
+        blockJson = await convertBedrockGeometryToJava(blockEntry.geoJson, textures);
     } else {
         blockJson = await getDefaultGeometry(blockName, textures);
     }
@@ -135,17 +124,14 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     const blockFilePath = path.join(javaModelsBlocksDir, `${blockName}.json`);
     try {
         await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
-        await fs.promises.writeFile(
-            blockFilePath, 
-            JSON.stringify(finalJson, null, '\t'), // use a tab for indentation
-            'utf8'
-        );
+        const jsonStr = formatJSONInline(finalJson, '\t');
+        await fs.promises.writeFile(blockFilePath, jsonStr, 'utf8');
     } catch (err) {
         console.error(`Failed to save block JSON for ${blockName}:`, err);
     }
 }
 
-async function convertBedrockGeometryToJava(blockData, bedrockGeometry, textures) {
+async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
     if (!bedrockGeometry) return null;
 
     let geometryObj = null;
@@ -157,105 +143,10 @@ async function convertBedrockGeometryToJava(blockData, bedrockGeometry, textures
         return { parent: "block/cube_all", textures, texture_size: [16,16], elements: [], groups: [] };
     }
 
-    const desc = blockData?.description || {};
+    const desc = geometryObj.description || {};
     const texW = desc?.texture_width ?? 16;
     const texH = desc?.texture_height ?? 16;
 
-    console.log(blockData?.description)
-
-    // CURRENT BUGS
-    // UVS ARE INCORRECT
-    // ROTATIONS SHOULD ALWAYS SHOW
-    // ADDS UNNEEDED FACES?
-
-    // CURRENT OUTPUT
-
-    /*{
-   "name": "root",
-   "from": [
-    0,
-    16.25,
-    0
-   ],
-   "to": [
-    16,
-    16.25,
-    16
-   ],
-   "faces": {
-    "up": {
-     "uv": [
-      0,
-      0,
-      16,
-      16
-     ],
-     "texture": "#0"
-    },
-    "down": {
-     "uv": [
-      0,
-      0,
-      16,
-      16
-     ],
-     "texture": "#0"
-    }
-   }
-  },
-  {
-   "name": "root",
-   "from": [
-    5,
-    16.25,
-    16
-   ],
-   "to": [
-    11,
-    17.25,
-    16
-   ],
-   "faces": {
-    "north": {
-     "uv": [
-      7,
-      11,
-      8,
-      12
-     ],
-     "texture": "#0"
-    },
-    "south": {
-     "uv": [
-      0,
-      0,
-      16,
-      16
-     ],
-     "texture": "#0"
-    }
-   }
-  }*/
-
-    // INTENDED OUTPUT
-    /*{
-			"name": "root",
-			"from": [0, 16.25, 0],
-			"to": [16, 16.25, 16],
-			"rotation": {"angle": 0, "axis": "y", "origin": [8, 0, 8]},
-			"faces": {
-				"up": {"uv": [0, 0, 8, 8], "texture": "#0"}
-			}
-		},
-		{
-			"name": "root",
-			"from": [5, 16.25, 16],
-			"to": [11, 17.25, 16],
-			"rotation": {"angle": 0, "axis": "y", "origin": [8, 0, 8]},
-			"faces": {
-				"north": {"uv": [3.5, 5.5, 4, 6], "texture": "#0"}
-			}
-		}*/
     const uvPxToJava = (u, v) => [(u / texW) * 16, (v / texH) * 16];
 
     const mapUvBox = (faceDef) => {
@@ -273,29 +164,41 @@ async function convertBedrockGeometryToJava(blockData, bedrockGeometry, textures
         return [x1, y1, x2, y2];
     };
 
-    const clampJavaAngle = (ang) => {
-        const allowed = [-45, -22.5, 0, 22.5, 45];
-        let best=0, bestErr=Infinity;
-        for (const a of allowed) { const e=Math.abs(a-ang); if(e<bestErr){bestErr=e;best=a;} }
-        return best;
-    };
+    function clampJavaAngle(angle, keepSign = false) {
+        const step = 22.5;
+        let snapped = Math.round(angle / step) * step;
+
+        if (!keepSign && snapped < 0) {
+            snapped += 360; 
+        }
+        return snapped;
+    }
 
     const buildFaces = (cube) => {
-        const uv = cube.uv || {};
         const faces = {};
         const faceList = ['north','south','east','west','up','down'];
-        const [sx,sy,sz] = cube.size || [0,0,0];
+        const defaultSizes = {
+            north: [cube.size[0], cube.size[1]],
+            south: [cube.size[0], cube.size[1]],
+            east: [cube.size[2], cube.size[1]],
+            west: [cube.size[2], cube.size[1]],
+            up: [cube.size[0], cube.size[2]],
+            down: [cube.size[0], cube.size[2]]
+        };
 
         for (const face of faceList) {
-            if (sx===0 && !['east','west'].includes(face)) continue;
-            if (sy===0 && !['up','down'].includes(face)) continue;
-            if (sz===0 && !['north','south'].includes(face)) continue;
-
-            const def = uv[face];
-            const uvBox = mapUvBox(def);
-            // always use numeric texture #0
-            const texRef = '#0';
-            faces[face] = { uv: uvBox, texture: texRef };
+            if (!cube.uv || !cube.uv[face]) continue; // only add if defined
+            const def = cube.uv[face];
+            let uvBox;
+            if (Array.isArray(def.uv) && Array.isArray(def.uv_size)) {
+                uvBox = mapUvBox(def);
+            } else {
+                // use cube-level UV and default face size
+                const [u,v] = cube.uv[face]?.uv || cube.uv;
+                const [w,h] = defaultSizes[face];
+                uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] });
+            }
+            faces[face] = { uv: uvBox, texture: "#0" };
         }
         return faces;
     };
@@ -311,13 +214,32 @@ async function convertBedrockGeometryToJava(blockData, bedrockGeometry, textures
         return [from,[fix(0),fix(1),fix(2)]];
     };
 
-    const mergeRotations = (boneRot,cubeRot) => {
-        const br = boneRot||[0,0,0], cr = cubeRot||[0,0,0];
-        const total = [br[0]+cr[0], br[1]+cr[1], br[2]+cr[2]];
-        const nz = total.map((v,i)=>({axis:['x','y','z'][i],v})).filter(o=>Math.abs(o.v)>1e-6);
-        if(nz.length===0) return null;
-        if(nz.length>1){console.warn(`Multi-axis rotation ${JSON.stringify(total)} cannot be represented on a single Java element.`); return {axis:null,angle:0};}
-        return {axis:nz[0].axis, angle:clampJavaAngle(nz[0].v)};
+    const offsetIfNeeded = (val, idx) => {
+        // Only offset X/Z if outside [0, 16]
+        if (idx !== 1 && (val < 0 || val > 16)) return val + 8;
+        return val;
+    };
+
+    const mergeRotations = (boneRot, cubeRot) => {
+        const br = boneRot || [0, 0, 0];
+        const cr = cubeRot || [0, 0, 0];
+        const total = [br[0] + cr[0], br[1] + cr[1], br[2] + cr[2]];
+
+        const axes = ['x', 'y', 'z'];
+        let maxIndex = total.reduce(
+            (maxIdx, val, idx, arr) => Math.abs(val) > Math.abs(arr[maxIdx]) ? idx : maxIdx,
+            0
+        );
+
+        let rawAngle = total[maxIndex]; // preserve sign
+        let clampedAngle = clampJavaAngle(rawAngle); // second param: keepSign
+
+        // Special case for "no rotation" — force y axis and default origin
+        if (Math.abs(total[0]) < 1e-6 && Math.abs(total[1]) < 1e-6 && Math.abs(total[2]) < 1e-6) {
+            return { axis: 'y', angle: 0, origin: [8, 0, 8] };
+        }
+
+        return { axis: axes[maxIndex], angle: clampedAngle, origin: null };
     };
 
     const chooseOrigin = (cube, bone, from, to) => {
@@ -332,37 +254,45 @@ async function convertBedrockGeometryToJava(blockData, bedrockGeometry, textures
     let colorCounter = 0; // increment per group
 
     for (const bone of bones) {
-        const boneRot = Array.isArray(bone.rotation)?bone.rotation:[0,0,0];
-        const bonePivot = Array.isArray(bone.pivot)?bone.pivot.slice(0,3):[0,0,0];
+        const boneRot = Array.isArray(bone.rotation) ? bone.rotation : [0, 0, 0];
+        const bonePivot = Array.isArray(bone.pivot) ? bone.pivot.slice(0, 3) : [0, 0, 0];
         const boneChildren = [];
 
-        if(!Array.isArray(bone.cubes)) continue;
-        for(const cube of bone.cubes){
-            if(!Array.isArray(cube.origin)||!Array.isArray(cube.size)) continue;
-            const [ox,oy,oz] = cube.origin;
-            const [sx,sy,sz] = cube.size;
-            let from = [ox+8, oy, oz+8];
-            let to   = [ox+sx+8, oy+sy, oz+sz+8];
+        if (!Array.isArray(bone.cubes)) continue;
+        for (const cube of bone.cubes) {
+            if (!Array.isArray(cube.origin) || !Array.isArray(cube.size)) continue;
+            const [ox, oy, oz] = cube.origin;
+            const [sx, sy, sz] = cube.size;
+            let from = [ox + 8, oy, oz + 8];
+            let to   = [ox + sx + 8, oy + sy, oz + sz + 8];
 
-            ({from,to} = applyInflate(from,to,typeof cube.inflate==='number'?cube.inflate:0));
-            [from,to] = epsilonizeIfNeeded(from,to);
+            ({ from, to } = applyInflate(from, to, typeof cube.inflate === 'number' ? cube.inflate : 0));
+            [from, to] = epsilonizeIfNeeded(from, to);
 
+            const cubeRot = Array.isArray(cube.rotation) ? cube.rotation : [0, 0, 0];
+            const merged = mergeRotations(boneRot, cubeRot);
+            const origin = merged.origin || chooseOrigin(cube, bone, from, to);
+
+            // Always include rotation before faces
             const faces = buildFaces(cube);
-            const cubeRot = Array.isArray(cube.rotation)?cube.rotation:[0,0,0];
-            const merged = mergeRotations(boneRot,cubeRot);
-
-            const element = { name: bone.name||'cube', from, to, faces };
-            const origin = chooseOrigin(cube,bone,from,to);
-
-            if(merged && merged.axis && Math.abs(merged.angle)>1e-6){
-                element.rotation = { angle: merged.angle, axis: merged.axis, origin };
-            }
+            const element = {
+                name: bone.name || 'cube',
+                from,
+                to,
+                rotation: { angle: merged.angle, axis: merged.axis, origin },
+                faces
+            };
 
             elements.push(element);
-            boneChildren.push(elements.length-1);
+            boneChildren.push(elements.length - 1);
         }
 
-        groups.push({ name: bone.name||'root', origin: bonePivot.map((v,i)=>i!==1?v+8:v), color: colorCounter++, children: boneChildren });
+        groups.push({
+            name: bone.name || 'root',
+            origin: bonePivot.map((v, i) => i !== 1 ? v + 8 : v),
+            color: colorCounter++,
+            children: boneChildren
+        });
     }
 
     return { parent: "block/cube_all", textures, texture_size: [texW,texH], elements, groups };
@@ -395,6 +325,34 @@ async function getDefaultGeometry(textures) {
     ];
 
     return { elements, groups };
+}
+
+function formatJSONInline(data, indent = '\t', level = 0, parentKey = '') {
+    const pad = indent.repeat(level);
+
+    if (Array.isArray(data)) {
+        // Inline if short and primitive values only
+        if (data.length <= 6 && data.every(v => typeof v !== 'object')) {
+            return `[${data.join(', ')}]`;
+        }
+        return '[\n' + data.map(v => pad + indent + formatJSONInline(v, indent, level + 1)).join(',\n') + '\n' + pad + ']';
+    }
+
+    if (data && typeof data === 'object') {
+        const keys = Object.keys(data);
+
+        // Skip collapsing for textures object
+        if (parentKey !== 'textures' && keys.length <= 4 && keys.every(k => {
+            const v = data[k];
+            return typeof v !== 'object' || (Array.isArray(v) && v.length <= 6 && v.every(x => typeof x !== 'object'));
+        })) {
+            return '{' + keys.map(k => JSON.stringify(k) + ': ' + formatJSONInline(data[k], indent, 0, k)).join(', ') + '}';
+        }
+
+        return '{\n' + keys.map(k => pad + indent + JSON.stringify(k) + ': ' + formatJSONInline(data[k], indent, level + 1, k)).join(',\n') + '\n' + pad + '}';
+    }
+
+    return JSON.stringify(data);
 }
 
 module.exports = {
