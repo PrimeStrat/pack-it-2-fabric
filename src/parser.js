@@ -7,7 +7,7 @@ let blockList = []
 async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const javaModelsBlocksDir = path.join(assetsDir, 'models', 'block');
     const javaModelsItemsDir = path.join(assetsDir, 'models', 'item');
-    const texturesDir = path.join(assetsDir, 'textures');
+    const javaBlockStatesDir = path.join(assetsDir, 'blockstates');
 
     // Access the nested "minecraft:block" object
     const blockData = blockEntry.blockJson?.["minecraft:block"];
@@ -81,11 +81,12 @@ function createBlockItem(javaBlockModelJson) {
 
 }
 
-// NOTES
-// Generates all files related to custom blocks (excluding walls, pillars, and slabs)
-// Handles stairs as well as all blocks with custom geometry
-// Due to Bedrock lacking stair geometry and almost all geos can be converted 
-// this function will handle the conversion of most geometry related changes.
+// Handles block states
+function generateBlockStates(blockEntry, MODID){
+
+}
+
+// Geometry converter
 async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     const blockId = blockEntry.id;
     const blockName = blockId.includes(':') ? blockId.split(':')[1] : blockId;
