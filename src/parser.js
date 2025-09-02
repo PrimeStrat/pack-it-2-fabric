@@ -19,9 +19,12 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const description = blockData.description || {};
     const components = blockData.components || {};
 
-    const identifier = description.identifier || 'unknown_block';
+    const identifier = description.identifier || [];
     const geometryRef = components['minecraft:geometry'] || blockEntry.geometryRef || null;
     const geoJson = blockEntry.geoJson || null;
+
+    const permutations = blockData.permutations || 'unknown_block';
+    const traits = description.traits || {};
 
     const entryForGeneration = {
         id: identifier,
@@ -43,6 +46,18 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
             MODID,
             ver
         );
+        await generateBlockStates(
+            identifier,
+            permutations,
+            traits,
+            javaBlockStatesDir,
+            MODID
+        )
+        await createItem(
+            identifier,
+            javaModelsItemsDir,
+            MODID
+        )
     }
 }
 
@@ -72,18 +87,68 @@ async function convertLangFile(langFileContent) {
 }
 
 // Handles conversion of items
-async function createItem(bedrockItemJson) {
+async function createItem(identifier, javaModelsItemsDir, MODID) {
+    try {
+        const itemName = identifier.split(":")[1];
+        const filePath = path.join(javaModelsItemsDir, `${itemName}.json`);
 
+        const content = {
+            parent: `${MODID}:block/${itemName}`
+        };
+
+        await fs.promises.mkdir(javaModelsItemsDir, { recursive: true });
+        await fs.promises.writeFile(filePath, JSON.stringify(content, null, 2), "utf-8");
+    } catch (err) {
+        console.error(err);
+    }
 }
 
-// Universal function that generates the item for each custom block
-function createBlockItem(javaBlockModelJson) {
+async function generateBlockStates(identifier, perm, traits, javaBlockStatesDir, MODID) {
+    const blockName = identifier.split(":")[1];
+    const outFile = path.join(javaBlockStatesDir, `${blockName}.json`);
 
-}
+    const variants = {};
+    const yOffset = traits?.["minecraft:placement_direction"]?.y_rotation_offset || 0;
 
-// Handles block states
-function generateBlockStates(blockEntry, MODID){
+    if (!Array.isArray(perm) || perm.length === 0 || perm === "unknown_block") {
+        variants[""] = { model: `${MODID}:block/${blockName}` };
+    } else {
+        for (const p of perm) {
+            const conditions = parseCondition(p.condition || "");
+            if (!conditions.length) continue;
 
+            const rotationArr = p.components?.["minecraft:transformation"]?.rotation || [];
+            const rot = bedrockRotationToJava(rotationArr, yOffset);
+
+            const variantParts = [];
+            for (const { key, value } of conditions) {
+                if (key === "cardinal_direction" || key === "facing_direction") {
+                    variantParts.push(`facing=${value}`);
+                } else if (key === "block_face") {
+                    if (value === "east" || value === "west") variantParts.push("axis=x");
+                    else if (value === "up" || value === "down") variantParts.push("axis=y");
+                    else if (value === "north" || value === "south") variantParts.push("axis=z");
+                } else if (key === "vertical_half") {
+                    variantParts.push(`type=${value}`);
+                } else if (key === "waterlogged") {
+                    variantParts.push(`waterlogged=${value}`);
+                }
+            }
+
+            const variantKey = variantParts.join(",");
+            variants[variantKey] = {
+                model: `${MODID}:block/${blockName}`,
+                ...(rot.x ? { x: rot.x } : {}),
+                ...(rot.y ? { y: rot.y } : {}),
+                ...(rot.z ? { z: rot.z } : {})
+            };
+        }
+    }
+
+    const blockStateJson = { variants };
+
+    await fs.mkdir(javaBlockStatesDir, { recursive: true });
+    await fs.writeFile(outFile, JSON.stringify(blockStateJson, null, 2));
 }
 
 // Geometry converter
@@ -354,6 +419,21 @@ function formatJSONInline(data, indent = '\t', level = 0, parentKey = '') {
     }
 
     return JSON.stringify(data);
+}
+
+function parseCondition(condition) {
+    const matches = [...condition.matchAll(/'minecraft:(.*?)'\)\s*==\s*'(\w+)'/g)];
+    return matches.map(([ , key, value ]) => ({ key, value }));
+}
+
+function bedrockRotationToJava(rotationArr, yOffset = 0) {
+    const [x = 0, y = 0, z = 0] = rotationArr;
+    let rot = { x, y, z };
+    if (yOffset) {
+        rot.y = (rot.y + yOffset) % 360;
+        if (rot.y > 180) rot.y -= 360;
+    }
+    return rot;
 }
 
 module.exports = {

@@ -32,7 +32,7 @@ async function generateFabricMod() {
         }
     }
 
-    await setupGradleProject(MODID);
+    await setupGradleProject(MODID); // init
     console.log('Gradle project files generated.');
 
     // Prepare output directories
@@ -146,6 +146,7 @@ async function generateFabricMod() {
 
     console.log('Fabric mod structure generated at:', OUT_DIR);
 
+    await setupGradleProject(MODID);
     await installAndBuild(MODID);
 }
 
