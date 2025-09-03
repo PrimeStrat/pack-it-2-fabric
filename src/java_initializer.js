@@ -376,7 +376,12 @@ function generateBlockListJavaFile(blockIds) {
     let listContent = "";
     
     if (blockIds.length > 0) {
-        const escapedIds = blockIds.map(b => `        "${b.id ?? b}"`).join(',\n');
+        const escapedIds = blockIds
+            .map(b => {
+                const id = b.id ?? b;
+                return `        "${id.includes(":") ? id.split(":")[1] : id}"`;
+            })
+            .join(',\n');
         listContent = `\n${escapedIds}\n    `;
     }
     

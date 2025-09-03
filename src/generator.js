@@ -201,14 +201,11 @@ async function setupGradleProject(MODID) {
             sources: ""
         },
         license: "MIT", 
-        icon: "*",
         environment: "*",
         entrypoints: {
             main: [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}`],
-            "fabric-datagen": [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}DataGenerator`],
             client: [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}Client`]
         },
-        mixins: [`${MODID.toLowerCase()}.mixins.json`],
         depends: {
             fabricloader: ">=0.15.0",
             minecraft: "~1.20.1",
@@ -342,7 +339,7 @@ async function installAndBuild(MODID) {
 
 async function outputMod(MODID){
     const OUT_DIR = path.resolve(__dirname, '../fabricModAssets'); 
-    const libsDir = path.join(OUT_DIR, 'build', 'libs');
+    const libsDir = path.join(OUT_DIR, 'build', 'devlibs');
 
     if (!fs.existsSync(libsDir)) {
         console.error('Build/libs folder does not exist.');
@@ -351,9 +348,7 @@ async function outputMod(MODID){
 
     const files = fs.readdirSync(libsDir);
     const jarFile = files.find(file =>
-        file.endsWith('.jar') &&
-        !file.includes('-sources') &&
-        !file.includes('-dev')
+        file.endsWith('.jar')
     );
 
     if (!jarFile) {

@@ -110,17 +110,27 @@ async function generateBlockStates(identifier, perm, traits, javaBlockStatesDir,
     const variants = {};
     const yOffset = traits?.["minecraft:placement_direction"]?.y_rotation_offset || 0;
 
+    const addVariant = (variantKey, rotationArr) => {
+        const rot = bedrockRotationToJava(rotationArr || [], yOffset);
+        variants[variantKey] = {
+            model: `${MODID}:block/${blockName}`,
+            ...(rot.x ? { x: rot.x } : {}),
+            ...(rot.y ? { y: rot.y } : {}),
+            ...(rot.z ? { z: rot.z } : {})
+        };
+    };
+
     if (!Array.isArray(perm) || perm.length === 0 || perm === "unknown_block") {
-        variants[""] = { model: `${MODID}:block/${blockName}` };
+        // Always create facing variants for cardinal directions
+        ["east", "south", "north", "west"].forEach(dir => addVariant(`facing=${dir}`));
     } else {
         for (const p of perm) {
             const conditions = parseCondition(p.condition || "");
             if (!conditions.length) continue;
 
             const rotationArr = p.components?.["minecraft:transformation"]?.rotation || [];
-            const rot = bedrockRotationToJava(rotationArr, yOffset);
-
             const variantParts = [];
+
             for (const { key, value } of conditions) {
                 if (key === "cardinal_direction" || key === "facing_direction") {
                     variantParts.push(`facing=${value}`);
@@ -136,12 +146,11 @@ async function generateBlockStates(identifier, perm, traits, javaBlockStatesDir,
             }
 
             const variantKey = variantParts.join(",");
-            variants[variantKey] = {
-                model: `${MODID}:block/${blockName}`,
-                ...(rot.x ? { x: rot.x } : {}),
-                ...(rot.y ? { y: rot.y } : {}),
-                ...(rot.z ? { z: rot.z } : {})
-            };
+            addVariant(variantKey, rotationArr);
+        }
+
+        if (Object.keys(variants).length === 0) {
+            ["east", "south", "north", "west"].forEach(dir => addVariant(`facing=${dir}`));
         }
     }
 
@@ -161,10 +170,10 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     let textureIndex = 0;
     if (blockEntry.material_instances) {
         const mat = blockEntry.material_instances['*'] || {};
-        if (mat.texture) textures[`${textureIndex}`] = `${MODID}:block/${mat.texture}`;
+        if (mat.texture) textures[`${textureIndex}`] = `${MODID}:blocks/${mat.texture}`;
         for (const face of ['up', 'down', 'north', 'south', 'east', 'west']) {
             if (mat[face]) {
-                textures[`${textureIndex}`] = `${MODID}:block/${mat[face]}`;
+                textures[`${textureIndex}`] = `${MODID}:blocks/${mat[face]}`;
             }
         }
     }
@@ -181,6 +190,7 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     const finalJson = {
         format_version: ver,
         credit: "Made with PackIt2Fabric",
+        parent: "block/cube_all",
         texture_size: blockJson?.texture_size || [16, 16],
         textures: textures,
         elements: blockJson?.elements || [],
@@ -280,12 +290,6 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         return [from,[fix(0),fix(1),fix(2)]];
     };
 
-    const offsetIfNeeded = (val, idx) => {
-        // Only offset X/Z if outside [0, 16]
-        if (idx !== 1 && (val < 0 || val > 16)) return val + 8;
-        return val;
-    };
-
     const mergeRotations = (boneRot, cubeRot) => {
         const br = boneRot || [0, 0, 0];
         const cr = cubeRot || [0, 0, 0];
@@ -361,7 +365,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         });
     }
 
-    return { parent: "block/cube_all", textures, texture_size: [texW,texH], elements, groups };
+    return { parent: "blocks/cube_all", textures, texture_size: [texW,texH], elements, groups };
 }
 
 async function getDefaultGeometry(textures) {
