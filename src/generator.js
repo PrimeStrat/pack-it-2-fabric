@@ -208,6 +208,7 @@ async function setupGradleProject(MODID) {
             "fabric-datagen": [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}DataGenerator`],
             client: [`com.${MODID.toLowerCase()}.${MODID.toUpperCase()}Client`]
         },
+        mixins: [`${MODID.toLowerCase()}.mixins.json`],
         depends: {
             fabricloader: ">=0.15.0",
             minecraft: "~1.20.1",
@@ -224,194 +225,135 @@ async function setupGradleProject(MODID) {
     console.log(`Setup complete! Using Minecraft version: ${selectedVersion}`);
 }
 
-async function scaffoldProject() {
-    if (!fs.existsSync(path.join(OUT_DIR, 'build.gradle'))) {
-        console.log('No Gradle project detected. Scaffolding Fabric example mod...');
-        // Option 1: clone Fabric example mod
-        await new Promise((resolve, reject) => {
-            exec(`git clone https://github.com/FabricMC/fabric-example-mod.git ${OUT_DIR}`, (err, stdout, stderr) => {
-                if (err) return reject(err);
-                console.log(stdout);
-                resolve();
-            });
-        });
-        console.log('Project scaffolded successfully.');
-    } else {
-        console.log('Gradle project already exists in OUT_DIR.');
-    }
-}
+async function installAndBuild(MODID) {
+    async function installGradle() {
+        const platform = os.platform();
+        console.log(`Attempting to install Gradle on ${platform}...`);
 
-async function generateWrapper() {
-    if (!fs.existsSync(path.join(OUT_DIR, 'gradlew'))) {
-        console.log('Generating Gradle wrapper...');
-        await new Promise((resolve, reject) => {
-            exec('gradle wrapper', { cwd: OUT_DIR }, (err, stdout, stderr) => {
-                if (err) return reject(stderr || err);
-                console.log(stdout);
-                resolve();
-            });
-        });
+        return new Promise((resolve, reject) => {
+            let cmd;
+            let args;
 
-        if (process.platform !== 'win32') {
-            await new Promise((resolve, reject) => {
-                exec('chmod +x gradlew', { cwd: OUT_DIR }, (err) => {
-                    if (err) return reject(err);
+            if (platform === 'darwin') {
+                cmd = 'brew';
+                args = ['install', 'gradle'];
+            } else if (platform === 'linux') {
+                cmd = 'sudo';
+                args = ['apt', 'install', '-y', 'gradle'];
+            } else if (platform === 'win32') {
+                cmd = 'choco';
+                args = ['install', 'gradle', '-y'];
+            } else {
+                return reject(new Error(`Unsupported platform: ${platform}`));
+            }
+
+            const installer = spawn(cmd, args, { stdio: 'inherit' });
+
+            installer.on('close', (code) => {
+                if (code === 0) {
                     resolve();
-                });
+                } else {
+                    reject(new Error(`${cmd} exited with code ${code}`));
+                }
             });
-        }
 
-        console.log('Gradle wrapper generated.');
-    } else {
-        console.log('Gradle wrapper already exists.');
+            installer.on('error', (err) => {
+                reject(err);
+            });
+        });
     }
-}
 
-async function killGradleProcesses() {
-    return new Promise((resolve, reject) => {
-        const cwd = path.resolve(OUT_DIR);
-
-        if (process.platform === 'win32') {
-            const cmd = `wmic process where "name='java.exe'" get ProcessId,CommandLine`;
-            exec(cmd, (err, stdout, stderr) => {
-                if (err) {
-                    console.warn('Error listing processes:', err);
+    async function checkAndMaybeInstallGradle() {
+        return new Promise((resolve, reject) => {
+            exec('gradle -v', async (error) => {
+                if (!error) {
+                    console.log('Gradle is already installed.');
                     return resolve();
                 }
 
-                const lines = stdout.split(/\r?\n/).filter(Boolean).slice(1);
-                lines.forEach(line => {
-                    const match = line.match(/(\d+)\s*$/);
-                    if (!match) return;
-                    const pid = match[1];
-                    if (line.includes(cwd)) {
-                        exec(`taskkill /PID ${pid} /F`, (err) => {
-                            if (err) console.warn(`Failed to kill PID ${pid}:`, err);
-                        });
+                console.warn('Gradle is not installed on your system.');
+                const answer = await promptUser('Would you like to install Gradle now? (y/n): ');
+                if (answer === 'y' || answer === 'yes') {
+                    try {
+                        await installGradle();
+                        resolve();
+                    } catch (err) {
+                        reject(err);
                     }
-                });
-
-                resolve();
-            });
-        } else {
-            const cmd = `pgrep -f "${cwd}"`;
-            exec(cmd, (err, stdout) => {
-                if (!stdout) return resolve();
-                const pids = stdout.split(/\r?\n/).filter(Boolean);
-                pids.forEach(pid => {
-                    exec(`kill -9 ${pid}`, (err) => {
-                        if (err) console.warn(`Failed to kill PID ${pid}:`, err);
-                    });
-                });
-                resolve();
-            });
-        }
-    });
-}
-
-async function buildProject() {
-    await killGradleProcesses(); 
-    console.log('Existing Gradle processes terminated.');
-
-    const buildCmd = process.platform === 'win32' ? 'gradlew.bat build' : './gradlew clean build';
-
-    await new Promise((resolve, reject) => {
-        exec(buildCmd, { cwd: OUT_DIR }, (err, stdout, stderr) => {
-            if (err) return reject(stderr || err);
-            console.log(stdout);
-            resolve();
-        });
-    });
-
-    console.log('Build complete.');
-}
-
-async function installGradle() {
-    const platform = os.platform();
-    console.log(`Attempting to install Gradle on ${platform}...`);
-
-    return new Promise((resolve, reject) => {
-        let cmd;
-        let args;
-
-        if (platform === 'darwin') {
-            cmd = 'brew';
-            args = ['install', 'gradle'];
-        } else if (platform === 'linux') {
-            cmd = 'sudo';
-            args = ['apt', 'install', '-y', 'gradle'];
-        } else if (platform === 'win32') {
-            cmd = 'choco';
-            args = ['install', 'gradle', '-y'];
-        } else {
-            return reject(new Error(`Unsupported platform: ${platform}`));
-        }
-
-        const installer = spawn(cmd, args, { stdio: 'inherit' });
-
-        installer.on('close', (code) => {
-            if (code === 0) {
-                resolve();
-            } else {
-                reject(new Error(`${cmd} exited with code ${code}`));
-            }
-        });
-
-        installer.on('error', (err) => {
-            reject(err);
-        });
-    });
-}
-
-async function checkAndMaybeInstallGradle() {
-    return new Promise((resolve, reject) => {
-        exec('gradle -v', async (error) => {
-            if (!error) {
-                console.log('Gradle is already installed.');
-                return resolve();
-            }
-
-            console.warn('Gradle is not installed on your system.');
-            const answer = await promptUser('Would you like to install Gradle now? (y/n): ');
-            if (answer === 'y' || answer === 'yes') {
-                try {
-                    await installGradle();
-                    resolve();
-                } catch (err) {
-                    reject(err);
+                } else {
+                    reject(new Error('Gradle is required but not installed.'));
                 }
-            } else {
-                reject(new Error('Gradle is required but not installed.'));
-            }
+            });
         });
-    });
-}
+    }
 
-async function installAndBuild(MODID) {
+    const gradlewPath = path.join(OUT_DIR, 'gradlew');
+
     try {
-        await checkAndMaybeInstallGradle();  
-        await scaffoldProject();            
-        await generateWrapper();             
-        await buildProject().catch(console.error);      
-        outputMod(MODID);
+        if (!fs.existsSync(gradlewPath)) {
+            console.log('Trying to generate wrapper...');
+
+            await checkAndMaybeInstallGradle();
+
+            // Generate wrapper
+            await new Promise((resolve, reject) => {
+                exec('gradle wrapper', { cwd: OUT_DIR }, (error, stdout, stderr) => {
+                    if (error) {
+                        console.error('Failed to generate gradlew:', stderr);
+                        return reject(error);
+                    }
+                    console.log('gradlew generated successfully.');
+                    resolve();
+                });
+            });
+        }
+
+        // Make gradlew executable (on Unix)
+        if (os.platform() !== 'win32') {
+            await new Promise((resolve, reject) => {
+                exec('chmod +x gradlew', { cwd: OUT_DIR }, (error) => {
+                    if (error) return reject(`chmod failed: ${error}`);
+                    resolve();
+                });
+            });
+        }
+
+        // Run build
+        await new Promise((resolve, reject) => {
+            const buildCmd = os.platform() === 'win32' ? 'gradlew.bat build' : './gradlew clean build';
+            exec(buildCmd, { cwd: OUT_DIR }, (error, stdout, stderr) => {
+                if (error) {
+                    console.error(`Build error:\n${stderr}`);
+                    return reject(error);
+                }
+                console.log(stdout);
+                resolve();
+            });
+        });
+
+        console.log('Build complete.');
     } catch (err) {
-        console.error('An error occurred:', err);
+        console.error('An error occurred:', err.message || err);
         process.exit(1);
     }
+
+    outputMod(MODID)
 }
 
 async function outputMod(MODID){
     const OUT_DIR = path.resolve(__dirname, '../fabricModAssets'); 
-    const libsDir = path.join(OUT_DIR, 'build', 'devlibs');
+    const libsDir = path.join(OUT_DIR, 'build', 'libs');
 
     if (!fs.existsSync(libsDir)) {
-        console.error('Unable to locate generated mod');
+        console.error('Build/libs folder does not exist.');
         return;
     }
 
     const files = fs.readdirSync(libsDir);
     const jarFile = files.find(file =>
-        file.endsWith('.jar')
+        file.endsWith('.jar') &&
+        !file.includes('-sources') &&
+        !file.includes('-dev')
     );
 
     if (!jarFile) {
