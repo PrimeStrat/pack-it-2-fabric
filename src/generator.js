@@ -61,7 +61,7 @@ async function generateFabricMod() {
     }
 
     // TEXTURES
-    const javaTexturesDir = path.join(assetsDir, 'textures');
+    const javaTexturesDir = path.join(assetsDir, 'textures', 'block');
     if (await fs.pathExists(ADDON_ASSETS)) {
         await fs.ensureDir(javaTexturesDir);
 
@@ -77,20 +77,22 @@ async function generateFabricMod() {
         }
 
         for (const texDir of texturesDirs) {
-            const subdirs = await fs.readdir(texDir);
+            // Recursively find .png files inside this textures folder
+            const pngFiles = glob.sync('**/*.png', {
+                cwd: texDir,
+                absolute: true
+            });
 
-            for (const sub of subdirs) {
-                const srcSubDir = path.join(texDir, sub);
-                const destSubDir = path.join(javaTexturesDir, sub);
+            for (const file of pngFiles) {
+                const fileName = path.basename(file);
+                const destFile = path.join(javaTexturesDir, fileName);
 
-                const stats = await fs.stat(srcSubDir);
-                if (stats.isDirectory()) {
-                    await fs.copy(srcSubDir, destSubDir, { overwrite: true });
-                }
+                // Copy each .png into textures/block/
+                await fs.copy(file, destFile, { overwrite: true });
             }
         }
 
-        console.log('Copied texture folders (block, item, etc.) into "textures".');
+        console.log('Inserted texture files into "textures/block/".');
     } else {
         console.log(`No textures found at ${ADDON_ASSETS}`);
     }
