@@ -39,7 +39,7 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
         entryForGeneration.traits = description.traits;
     }
 
-    blockList.push(entryForGeneration);
+    blockList.push(blockEntry);
 
     if (geometryRef && geoJson) {
         await generateBlockModel(
