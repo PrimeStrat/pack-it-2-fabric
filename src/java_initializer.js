@@ -20,8 +20,12 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
 
-    let blockListJavaFile = generateBlockListJavaFile(blockList)
-    await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile)
+    let blockListJavaFile = generateBlockListJavaFile(blockList);
+    await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile);
+
+    let blockDataJavaFile = generateBlockDataJavaFile();
+    await writeJavaFile(basePath, `${basePackage}.block`, `BlockData`, blockDataJavaFile);
+
 
     await writeBuildGradle(MODID, basePackage, OUT_DIR, VER)
 }
@@ -134,10 +138,10 @@ public class ${MODID.toUpperCase()} implements ModInitializer {
 
     @Override
     public void onInitialize() {
-        List<String> blocks = ModBlockList.BLOCK_LIST;
+        List<BlockData> blocks = ModBlockList.BLOCK_LIST;
         ModItems.registerModItems();
         ModItemGroups.registerItemGroups();
-        if (blocks != null) {
+        if (blocks != null && !blocks.isEmpty()) {
             ModBlocks.registerModBlocks(blocks);
         }
     }
@@ -153,16 +157,34 @@ public class ${MODID.toUpperCase()} implements ModInitializer {
 function generateModClient(MODID, basePackage) {
     return `
 import ${basePackage}.block.ModBlocks;
+import ${basePackage}.block.ModBlockList;
+import ${basePackage}.block.BlockData;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.blockrenderlayer.v1.BlockRenderLayerMap;
 import net.minecraft.client.render.RenderLayer;
+import net.minecraft.block.Block;
 
 public class ${MODID.toUpperCase()}Client implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
-        ModBlocks.${MODID.toUpperCase()}_BLOCKS.forEach(block -> {
-            BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getTranslucent());
-        });
+        // Match BlockData with registered blocks
+        for (int i = 0; i < ModBlockList.BLOCK_LIST.size(); i++) {
+            BlockData data = ModBlockList.BLOCK_LIST.get(i);
+            Block block = ModBlocks.${MODID.toUpperCase()}_BLOCKS.get(i);
+
+            if (data.getRenderMethod() != null) {
+                switch (data.getRenderMethod()) {
+                    case "blend":
+                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getTranslucent());
+                        break;
+                    case "alpha_test":
+                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getCutout());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        }
     }
 }`
 }
@@ -245,7 +267,7 @@ public class ModItemGroups {
  * @param { String } basePackage 
  * @returns {{ ModBlocks: string, ModBlockModel: string }}
  */
-function generateBlockHandler(MODID, basePackage, blockComponents) {
+function generateBlockHandler(MODID, basePackage) {
 
     const upper = MODID.toUpperCase();
 
@@ -267,15 +289,21 @@ import java.util.List;
 public class ModBlocks {
     public static final List<Block> ${upper}_BLOCKS = new ArrayList<>();
 
-    public static Block loadBlock(String name) {
-        // Default block settings
+    public static Block loadBlock(BlockData data) {
         FabricBlockSettings settings = FabricBlockSettings.copyOf(Blocks.STONE);
-        name = name.toLowerCase();
 
-        // Default block loading
-        // System.out.println(name + " loaded as BLOCK");
+        if (data.getLightEmission() > 0) {
+            settings.luminance(state -> data.getLightEmission());
+        }
+
+        if (data.getLightDampening() > 0) {
+            settings.nonOpaque();
+        }
+
+        settings.noBlockBreakParticles();
+
         Block block = new ModBlockModel(settings);
-        return registerBlock(name, block);
+        return registerBlock(data.getId(), block);
     }
 
     private static Block registerBlock(String name, Block block) {
@@ -284,12 +312,16 @@ public class ModBlocks {
     }
 
     private static Item registerBlockItem(String name, Block block) {
-        return Registry.register(Registries.ITEM, new Identifier(${upper}.MOD_ID, name), new BlockItem(block, new FabricItemSettings()));
+        return Registry.register(
+            Registries.ITEM,
+            new Identifier(${upper}.MOD_ID, name),
+            new BlockItem(block, new FabricItemSettings())
+        );
     }
 
-    public static void registerModBlocks(List<String> blocks) {
+    public static void registerModBlocks(List<BlockData> blocks) {
         ${upper}.LOGGER.info("Registering ModBlocks from " + ${upper}.MOD_ID);
-        blocks.forEach(name -> ${upper}_BLOCKS.add(loadBlock(name)));
+        blocks.forEach(data -> ${upper}_BLOCKS.add(loadBlock(data)));
     }
 }
 `.trim();
@@ -366,14 +398,7 @@ public class ModBlockModel extends FacingBlock {
 }
 
 /**
- * Generate a Java file that contains hardcoded block data objects with selected components.
- * Missing values are automatically replaced with null or defaults.
- * 
- * @param {String} MODID 
- * @param {String} basePackage 
- * @param {Object[]} blockEntries - Array of block objects like 
- *   { id: "mymod:block", blockJson: {...}, geoJson: {...} }
- * @returns {String} - Java file content
+ * Generate ModBlockList.java that references BlockData.
  */
 function generateBlockListJavaFile(blockEntries) {
     const serializedBlocks = blockEntries.map(entry => {
@@ -404,8 +429,6 @@ function generateBlockListJavaFile(blockEntries) {
     }).join(",\n");
 
     return `
-package ${basePackage};
-
 import java.util.List;
 import java.util.Arrays;
 
@@ -418,11 +441,19 @@ public class ModBlockList {
 ${serializedBlocks}
     );
 }
+`.trim();
+}
+
+/**
+ * Generate BlockData.java as its own file.
+ */
+function generateBlockDataJavaFile() {
+    return `
 
 /**
  * Container class for storing key Bedrock block data inside Java.
  */
-class BlockData {
+public class BlockData {
     private final String id;
     private final int lightDampening;
     private final int lightEmission;
