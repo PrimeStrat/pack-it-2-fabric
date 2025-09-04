@@ -9,6 +9,8 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const javaModelsItemsDir = path.join(assetsDir, 'models', 'item');
     const javaBlockStatesDir = path.join(assetsDir, 'blockstates');
 
+    // console.log(JSON.stringify(blockEntry, null, 2)); DEBUG
+
     // Access the nested "minecraft:block" object
     const blockData = blockEntry.blockJson?.["minecraft:block"];
     if (!blockData) {
@@ -170,10 +172,10 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     let textureIndex = 0;
     if (blockEntry.material_instances) {
         const mat = blockEntry.material_instances['*'] || {};
-        if (mat.texture) textures[`${textureIndex}`] = `${MODID}:blocks/${mat.texture}`;
+        if (mat.texture) textures[`${textureIndex}`] = `${MODID}:block/${mat.texture}`;
         for (const face of ['up', 'down', 'north', 'south', 'east', 'west']) {
             if (mat[face]) {
-                textures[`${textureIndex}`] = `${MODID}:blocks/${mat[face]}`;
+                textures[`${textureIndex}`] = `${MODID}:block/${mat[face]}`;
             }
         }
     }
@@ -240,14 +242,19 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         return [x1, y1, x2, y2];
     };
 
-    function clampJavaAngle(angle, keepSign = false) {
-        const step = 22.5;
-        let snapped = Math.round(angle / step) * step;
+    function clampJavaAngle(angle) {
+        const allowed = [-45, -22.5, 0, 22.5, 45];
+        let closest = allowed[0];
+        let minDiff = Math.abs(angle - closest);
 
-        if (!keepSign && snapped < 0) {
-            snapped += 360; 
+        for (const val of allowed) {
+            const diff = Math.abs(angle - val);
+            if (diff < minDiff) {
+                closest = val;
+                minDiff = diff;
+            }
         }
-        return snapped;
+        return closest;
     }
 
     const buildFaces = (cube) => {
@@ -365,7 +372,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         });
     }
 
-    return { parent: "blocks/cube_all", textures, texture_size: [texW,texH], elements, groups };
+    return { parent: "block/cube_all", textures, texture_size: [texW,texH], elements, groups };
 }
 
 async function getDefaultGeometry(textures) {
