@@ -366,31 +366,90 @@ public class ModBlockModel extends FacingBlock {
 }
 
 /**
+ * Generate a Java file that contains hardcoded block data objects with selected components.
+ * Missing values are automatically replaced with null or defaults.
  * 
- * @param { String } MODID 
- * @param { String } basePackage 
- * @param {String[]} blockIds - Array of block ID strings (e.g. ["mymod:stone", "mymod:glow_dirt"])
+ * @param {String} MODID 
+ * @param {String} basePackage 
+ * @param {Object[]} blockEntries - Array of block objects like 
+ *   { id: "mymod:block", blockJson: {...}, geoJson: {...} }
  * @returns {String} - Java file content
  */
-function generateBlockListJavaFile(blockIds) {
-    let listContent = "";
-    
-    if (blockIds.length > 0) {
-        const escapedIds = blockIds
-            .map(b => {
-                const id = b.id ?? b;
-                return `        "${id.includes(":") ? id.split(":")[1] : id}"`;
-            })
-            .join(',\n');
-        listContent = `\n${escapedIds}\n    `;
-    }
-    
+function generateBlockListJavaFile(blockEntries) {
+    const serializedBlocks = blockEntries.map(entry => {
+        const id = entry.id ?? entry.blockJson?.["minecraft:block"]?.description?.identifier ?? "unknown";
+
+        const components = entry.blockJson?.["minecraft:block"]?.components ?? {};
+
+        const lightDamp = components["minecraft:light_dampening"] ?? 0;
+        const lightEmit = components["minecraft:light_emission"] ?? 0;
+
+        const materialInstances = components["minecraft:material_instances"] ?? {};
+        const mainMat = materialInstances["*"] ?? {};
+
+        const texture = mainMat.texture !== undefined ? `"${mainMat.texture}"` : "null";
+        const renderMethod = mainMat.render_method !== undefined ? `"${mainMat.render_method}"` : "null";
+        const ambientOcclusion = mainMat.ambient_occlusion ?? false;
+        const faceDimming = mainMat.face_dimming ?? false;
+
+        return `        new BlockData(
+            "${id}",
+            ${lightDamp},
+            ${lightEmit},
+            ${texture},
+            ${renderMethod},
+            ${ambientOcclusion},
+            ${faceDimming}
+        )`;
+    }).join(",\n");
+
     return `
+package ${basePackage};
+
 import java.util.List;
 import java.util.Arrays;
 
+/**
+ * Auto-generated block list with selected Bedrock block data.
+ * Missing values are set to null or default.
+ */
 public class ModBlockList {
-    public static final List<String> BLOCK_LIST = Arrays.asList(${listContent});
+    public static final List<BlockData> BLOCK_LIST = Arrays.asList(
+${serializedBlocks}
+    );
+}
+
+/**
+ * Container class for storing key Bedrock block data inside Java.
+ */
+class BlockData {
+    private final String id;
+    private final int lightDampening;
+    private final int lightEmission;
+    private final String texture;
+    private final String renderMethod;
+    private final boolean ambientOcclusion;
+    private final boolean faceDimming;
+
+    public BlockData(String id, int lightDampening, int lightEmission,
+                     String texture, String renderMethod,
+                     boolean ambientOcclusion, boolean faceDimming) {
+        this.id = id;
+        this.lightDampening = lightDampening;
+        this.lightEmission = lightEmission;
+        this.texture = texture;
+        this.renderMethod = renderMethod;
+        this.ambientOcclusion = ambientOcclusion;
+        this.faceDimming = faceDimming;
+    }
+
+    public String getId() { return id; }
+    public int getLightDampening() { return lightDampening; }
+    public int getLightEmission() { return lightEmission; }
+    public String getTexture() { return texture; }
+    public String getRenderMethod() { return renderMethod; }
+    public boolean hasAmbientOcclusion() { return ambientOcclusion; }
+    public boolean hasFaceDimming() { return faceDimming; }
 }
 `.trim();
 }
