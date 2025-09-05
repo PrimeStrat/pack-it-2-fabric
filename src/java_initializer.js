@@ -407,6 +407,7 @@ function generateBlockListJavaFile(blockEntries) {
         let id = entry.id ?? entry.blockJson?.["minecraft:block"]?.description?.identifier ?? "unknown";
         if (id.includes(":")) {
             id = id.split(":")[1];
+        }
 
         const components = entry.blockJson?.["minecraft:block"]?.components ?? {};
 
