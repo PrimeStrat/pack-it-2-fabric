@@ -19,6 +19,21 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const traits = description.traits || {};
     const materialInstances = components['minecraft:material_instances'] || {};
 
+    const mainMat = materialInstances["*"] ?? {};
+
+    let blockGenType = "facing"; 
+
+    if (traits?.["minecraft:placement_position"]?.enabled_states?.includes("minecraft:vertical_half") && identifier.includes("slab")) {
+        blockGenType = "slab";
+    }
+
+    const hasUp = materialInstances["up"]?.texture !== undefined;
+    const hasDown = materialInstances["down"]?.texture !== undefined;
+    const hasSide = mainMat?.texture !== undefined;
+    if (hasUp && hasDown && hasSide && identifier.includes("pillar")) {
+        blockGenType = "pillar";
+    }
+
     blockList.push(blockEntry);
 
     const geometryRef = components['minecraft:geometry'] || blockEntry.geometryRefs?.[0] || null;
@@ -32,7 +47,7 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
             material_instances: materialInstances,
             traits
         };
-        await generateBlockModel(entryForGeneration, javaModelsBlocksDir, MODID, ver);
+        await generateBlockModel(entryForGeneration, javaModelsBlocksDir, MODID, ver, blockGenType);
     }
 
     const blockStatesPermutations = permutations.map(p => ({
@@ -43,7 +58,7 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
         }
     }));
 
-    await generateBlockStates(identifier, blockStatesPermutations, traits, javaBlockStatesDir, MODID);
+    await generateBlockStates(identifier, blockStatesPermutations, traits, javaBlockStatesDir, MODID, blockGenType);
     await createItem(identifier, javaModelsItemsDir, MODID);
 }
    
@@ -89,33 +104,57 @@ async function createItem(identifier, javaModelsItemsDir, MODID) {
     }
 }
 
-async function generateBlockStates(identifier, permutations, traits, javaBlockStatesDir, MODID) {
+async function generateBlockStates(identifier, permutations, traits, javaBlockStatesDir, MODID, blockGenType) {
     const blockName = identifier.split(":")[1];
     const outFile = path.join(javaBlockStatesDir, `${blockName}.json`);
 
     const variants = {};
     const facingToY = { north: 180, south: 0, west: 90, east: 270 };
 
+    // Respect y_rotation_offset if defined
+    let yRotationOffset = 0;
+    if (traits?.["minecraft:placement_direction"]?.y_rotation_offset !== undefined) {
+        yRotationOffset = traits["minecraft:placement_direction"].y_rotation_offset;
+    }
+
     const addVariant = (variantKey, useY = false) => {
         const variant = { model: `${MODID}:block/${blockName}` };
+
         if (useY) {
             const match = variantKey.match(/facing=(north|south|west|east)/);
-            if (match) variant.y = facingToY[match[1]];
+            if (match) {
+                let baseY = facingToY[match[1]];
+                variant.y = (baseY + yRotationOffset) % 360; // apply offset
+            }
         }
         variants[variantKey] = variant;
     };
 
-    if (!Array.isArray(permutations) || permutations.length === 0 || permutations === "unknown_block") {
-        ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
-    } else {
-        for (const perm of permutations) {
-            const condition = perm.condition || "";
-            const match = condition.match(/q\.block_state\('minecraft:cardinal_direction'\)\s*==\s*'(\w+)'/);
-            if (!match) continue;
-            addVariant(`facing=${match[1]}`, true);
-        }
-        if (Object.keys(variants).length === 0) {
+    // Handle slab blockstates (only bottom and top)
+    if (blockGenType === "slab") {
+        variants["type=bottom"] = { model: `${MODID}:block/${blockName}` };
+        variants["type=top"] = { model: `${MODID}:block/${blockName}_top` };
+    }
+    // Handle pillar blockstates
+    else if (blockGenType === "pillar") {
+        variants["axis=x"] = { model: `${MODID}:block/${blockName}`, x: 90, y: 90 };
+        variants["axis=y"] = { model: `${MODID}:block/${blockName}` }; // default upright
+        variants["axis=z"] = { model: `${MODID}:block/${blockName}`, x: 90 };
+    }
+    // Handle facing blockstates
+    else {
+        if (!Array.isArray(permutations) || permutations.length === 0 || permutations === "unknown_block") {
             ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
+        } else {
+            for (const perm of permutations) {
+                const condition = perm.condition || "";
+                const match = condition.match(/q\.block_state\('minecraft:(?:cardinal_direction|facing_direction)'\)\s*==\s*'(\w+)'/);
+                if (!match) continue;
+                addVariant(`facing=${match[1]}`, true);
+            }
+            if (Object.keys(variants).length === 0) {
+                ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
+            }
         }
     }
 
@@ -125,7 +164,7 @@ async function generateBlockStates(identifier, permutations, traits, javaBlockSt
 }
 
 // Geometry converter
-async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
+async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver, blockGenType) {
     const blockId = blockEntry.id;
     const blockName = blockId.includes(':') ? blockId.split(':')[1] : blockId;
 
@@ -157,22 +196,62 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
         )
         : await getDefaultGeometry(blockName, textures);
 
-    const finalJson = {
-        format_version: ver,
-        credit: "Made with PackIt2Fabric",
-        parent: "block/cube_all",
-        texture_size: blockJson?.texture_size || [16, 16],
-        textures,
-        elements: blockJson?.elements || [],
-        groups: blockJson?.groups || []
+    const normalizeToRange = (elements, fromY) => {
+        return elements.map(el => {
+            const newEl = { ...el };
+            const height = el.to[1] - el.from[1];
+            newEl.from = [...el.from];
+            newEl.to = [...el.to];
+
+            newEl.from[1] = fromY;
+            newEl.to[1] = fromY + height;
+
+            // Clamp to valid slab bounds
+            if (fromY === 0 && newEl.to[1] > 8) newEl.to[1] = 8;
+            if (fromY === 8 && newEl.to[1] > 16) newEl.to[1] = 16;
+
+            return newEl;
+        });
     };
 
-    const blockFilePath = path.join(javaModelsBlocksDir, `${blockName}.json`);
-    await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
-    await fs.promises.writeFile(blockFilePath, formatJSONInline(finalJson, '\t'), 'utf8');
+    if (blockGenType === "slab") {
+        const bottomJson = {
+            format_version: ver,
+            credit: "Made with PackIt2Fabric",
+            parent: "block/cube_all",
+            texture_size: blockJson?.texture_size || [16, 16],
+            textures,
+            elements: normalizeToRange(blockJson?.elements || [], 0),
+            groups: blockJson?.groups || []
+        };
+        const bottomPath = path.join(javaModelsBlocksDir, `${blockName}.json`);
+        await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
+        await fs.promises.writeFile(bottomPath, formatJSONInline(bottomJson, '\t'), 'utf8');
+
+        const topJson = {
+            ...bottomJson,
+            elements: normalizeToRange(blockJson?.elements || [], 8)
+        };
+        const topPath = path.join(javaModelsBlocksDir, `${blockName}_top.json`);
+        await fs.promises.writeFile(topPath, formatJSONInline(topJson, '\t'), 'utf8');
+    } else {
+        const finalJson = {
+            format_version: ver,
+            credit: "Made with PackIt2Fabric",
+            parent: "block/cube_all",
+            texture_size: blockJson?.texture_size || [16, 16],
+            textures,
+            elements: blockJson?.elements || [],
+            groups: blockJson?.groups || []
+        };
+
+        const blockFilePath = path.join(javaModelsBlocksDir, `${blockName}.json`);
+        await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
+        await fs.promises.writeFile(blockFilePath, formatJSONInline(finalJson, '\t'), 'utf8');
+    }
 }
 
-async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey = {}) {
+async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey = {}, blockGenType) {
     if (!bedrockGeometry) return null;
 
     let vParent = "block/cube_all"

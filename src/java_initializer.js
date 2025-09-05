@@ -19,7 +19,7 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     let { ModBlocks, ModBlockModel, ModSlabBlock } = generateBlockHandler(MODID, basePackage, blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
-    await writeJavaFile(basePath, `${basePackage}.block`, `ModSlabModel`, ModSlabBlock)
+    await writeJavaFile(basePath, `${basePackage}.block`, `ModSlabBlock`, ModSlabBlock)
 
     let blockListJavaFile = generateBlockListJavaFile(blockList);
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile);
@@ -46,12 +46,12 @@ ${content}
 
 async function writeBuildGradle(MODID, basePackage, OUT_DIR, VER = '1.20.1') {
     const yarnMappings = '1.20.1+build.10';
-    const loaderVersion = '0.15.0';
+    const loaderVersion = '0.17.2';
     const fabricApiVersion = '0.91.0+1.20.1';
     const gradleContent = `
 plugins {
-    id 'fabric-loom' version '1.5.4'
-    id 'java'
+	id 'fabric-loom' version '1.5.4'
+	id 'java'
 }
 
 group = '${basePackage}'
@@ -60,7 +60,6 @@ version = '1.0.0'
 repositories {
     mavenCentral()
     maven { url "https://maven.tomalbrc.de" }
-    //maven { url 'https://maven.fabricmc.net/' }
 }
 
 fabricApi {
@@ -92,8 +91,9 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 java {
-    withSourcesJar()
-
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
+    }
     sourceCompatibility = JavaVersion.VERSION_17
     targetCompatibility = JavaVersion.VERSION_17
 }
@@ -232,7 +232,6 @@ public class ModItems {
 
     const modItemGroups = `
 import ${basePackage}.${upper};
-import ${basePackage}.item.ModItems;
 import ${basePackage}.block.ModBlocks;
 import net.fabricmc.fabric.api.itemgroup.v1.FabricItemGroup;
 import net.minecraft.item.ItemGroup;
@@ -282,6 +281,7 @@ import net.fabricmc.fabric.api.item.v1.FabricItemSettings;
 import net.fabricmc.fabric.api.object.builder.v1.block.FabricBlockSettings;
 import net.minecraft.block.Block;
 import net.minecraft.block.Blocks;
+import net.minecraft.block.PillarBlock;
 import net.minecraft.item.BlockItem;
 import net.minecraft.item.Item;
 import net.minecraft.registry.Registries;
@@ -306,10 +306,17 @@ public class ModBlocks {
 
         Block block;
 
-        if (data.getId().contains("slab")) {
-            block = new ModSlabBlock(settings);
-        } else {
-            block = new ModBlockModel(settings);
+        switch (data.getBlockGenType()) {
+            case "slab":
+                block = new ModSlabBlock(settings);
+                break;
+            case "pillar":
+                block = new PillarBlock(settings);
+                break;
+            case "facing":
+            default:
+                block = new ModBlockModel(settings);
+                break;
         }
 
         return registerBlock(data.getId(), block);
@@ -381,6 +388,7 @@ public class ModBlockModel extends FacingBlock {
     const modSlabBlock = `
 import net.minecraft.block.BlockState;
 import net.minecraft.block.SlabBlock;
+import net.minecraft.block.enums.SlabType;
 import net.minecraft.item.ItemPlacementContext;
 import net.minecraft.util.math.Direction;
 
@@ -421,13 +429,29 @@ function generateBlockListJavaFile(blockEntries) {
             id = id.split(":")[1];
         }
 
-        const components = entry.blockJson?.["minecraft:block"]?.components ?? {};
+        const block = entry.blockJson?.["minecraft:block"] ?? {};
+        const components = block.components ?? {};
+        const traits = block.description?.traits ?? {};
+        const materialInstances = components["minecraft:material_instances"] ?? {};
+        const mainMat = materialInstances["*"] ?? {};
+
+        let blockGenType = "facing"; // default
+
+        // Slab check (vertical_half trait)
+        if (traits?.["minecraft:placement_position"]?.enabled_states?.includes("minecraft:vertical_half") && id.includes("slab")) {
+            blockGenType = "slab";
+        }
+
+        // Pillar check (distinct up/down/side textures)
+        const hasUp = materialInstances["up"]?.texture !== undefined;
+        const hasDown = materialInstances["down"]?.texture !== undefined;
+        const hasSide = mainMat?.texture !== undefined;
+        if (hasUp && hasDown && hasSide && id.includes("pillar")) {
+            blockGenType = "pillar";
+        }
 
         const lightDamp = components["minecraft:light_dampening"] ?? 0;
         const lightEmit = components["minecraft:light_emission"] ?? 0;
-
-        const materialInstances = components["minecraft:material_instances"] ?? {};
-        const mainMat = materialInstances["*"] ?? {};
 
         const texture = mainMat.texture !== undefined ? `"${mainMat.texture}"` : "null";
         const renderMethod = mainMat.render_method !== undefined ? `"${mainMat.render_method}"` : "null";
@@ -441,7 +465,8 @@ function generateBlockListJavaFile(blockEntries) {
             ${texture},
             ${renderMethod},
             ${ambientOcclusion},
-            ${faceDimming}
+            ${faceDimming},
+            "${blockGenType}"
         )`;
     }).join(",\n");
 
@@ -478,10 +503,12 @@ public class BlockData {
     private final String renderMethod;
     private final boolean ambientOcclusion;
     private final boolean faceDimming;
+    private final String blockGenType; // slab, pillar, facing
 
     public BlockData(String id, int lightDampening, int lightEmission,
                      String texture, String renderMethod,
-                     boolean ambientOcclusion, boolean faceDimming) {
+                     boolean ambientOcclusion, boolean faceDimming,
+                     String blockGenType) {
         this.id = id;
         this.lightDampening = lightDampening;
         this.lightEmission = lightEmission;
@@ -489,6 +516,7 @@ public class BlockData {
         this.renderMethod = renderMethod;
         this.ambientOcclusion = ambientOcclusion;
         this.faceDimming = faceDimming;
+        this.blockGenType = blockGenType;
     }
 
     public String getId() { return id; }
@@ -498,6 +526,7 @@ public class BlockData {
     public String getRenderMethod() { return renderMethod; }
     public boolean hasAmbientOcclusion() { return ambientOcclusion; }
     public boolean hasFaceDimming() { return faceDimming; }
+    public String getBlockGenType() { return blockGenType; }
 }
 `.trim();
 }
