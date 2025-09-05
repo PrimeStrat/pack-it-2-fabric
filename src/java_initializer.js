@@ -16,9 +16,10 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItems`, ModItems)
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItemGroups`, ModItemGroups)
 
-    let { ModBlocks, ModBlockModel } = generateBlockHandler(MODID, basePackage, blockList)
+    let { ModBlocks, ModBlockModel, ModSlabBlock } = generateBlockHandler(MODID, basePackage, blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
+    await writeJavaFile(basePath, `${basePackage}.block`, `ModSlabModel`, ModSlabBlock)
 
     let blockListJavaFile = generateBlockListJavaFile(blockList);
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile);
@@ -269,7 +270,7 @@ public class ModItemGroups {
  * 
  * @param { String } MODID 
  * @param { String } basePackage 
- * @returns {{ ModBlocks: string, ModBlockModel: string }}
+ * @returns {{ ModBlocks: string, ModBlockModel: string, ModSlabBlock: string }}
  */
 function generateBlockHandler(MODID, basePackage) {
 
@@ -303,7 +304,14 @@ public class ModBlocks {
         settings.nonOpaque();
         settings.noBlockBreakParticles();
 
-        Block block = new ModBlockModel(settings);
+        Block block;
+
+        if (data.getId().contains("slab")) {
+            block = new ModSlabBlock(settings);
+        } else {
+            block = new ModBlockModel(settings);
+        }
+
         return registerBlock(data.getId(), block);
     }
 
@@ -327,7 +335,8 @@ public class ModBlocks {
 }
 `.trim();
 
-    const modBlockModel = `import net.minecraft.block.Block;
+    const modBlockModel = `
+import net.minecraft.block.Block;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.FacingBlock;
 import net.minecraft.item.ItemPlacementContext;
@@ -336,57 +345,60 @@ import net.minecraft.state.property.DirectionProperty;
 import net.minecraft.state.property.Properties;
 import net.minecraft.util.BlockMirror;
 import net.minecraft.util.BlockRotation;
-import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
-import net.minecraft.world.World;
 
 public class ModBlockModel extends FacingBlock {
 
-    // Use standard horizontal facing property
     public static final DirectionProperty FACING = Properties.HORIZONTAL_FACING;
 
     public ModBlockModel(Settings settings) {
         super(settings);
+        this.setDefaultState(this.stateManager.getDefaultState().with(FACING, Direction.NORTH));
     }
 
-    // This method determines the rotation when placing the block.
     @Override
     public BlockState getPlacementState(ItemPlacementContext ctx) {
-        // If the player is looking up or down, the block will face the player’s horizontal direction.
-        if (ctx.getPlayerLookDirection().getOpposite() == Direction.UP || ctx.getPlayerLookDirection().getOpposite() == Direction.DOWN) {
-            return this.getDefaultState().with(FACING, ctx.getHorizontalPlayerFacing().getOpposite());
-        }
-        // Otherwise, the block will face the player’s look direction.
-        return this.getDefaultState().with(FACING, ctx.getPlayerLookDirection().getOpposite());
+        return this.getDefaultState().with(FACING, ctx.getHorizontalPlayerFacing().getOpposite());
     }
 
-    // Handle block rotation
     @Override
     public BlockState rotate(BlockState state, BlockRotation rotation) {
-        // Rotate the block's facing direction by the rotation
         return state.with(FACING, rotation.rotate(state.get(FACING)));
     }
 
-    // Handle block mirroring (for blocks like doors, where mirroring inverts the facing)
     @Override
     public BlockState mirror(BlockState state, BlockMirror mirror) {
         return state.rotate(mirror.getRotation(state.get(FACING)));
     }
 
-    // Add the facing property to the block state so it can be tracked and saved
     @Override
     protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
         builder.add(FACING);
     }
+}
+`.trim();
 
-    // This ensures that block states (including rotation) are saved correctly in the world
+    const modSlabBlock = `
+import net.minecraft.block.BlockState;
+import net.minecraft.block.SlabBlock;
+import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.util.math.Direction;
+
+public class ModSlabBlock extends SlabBlock {
+    public ModSlabBlock(Settings settings) {
+        super(settings);
+    }
+
     @Override
-    public void onBlockAdded(BlockState state, World world, BlockPos pos, BlockState oldState, boolean notify) {
-        // Vanilla behavior: mark the chunk as needing a save when the block is placed or updated
-        if (!world.isClient) {
-            world.setBlockState(pos, state, Block.NOTIFY_ALL); // Ensure the block state gets updated
-            world.markDirty(pos); // Mark the chunk as needing a save
-            world.getChunk(pos).setNeedsSaving(true); // Force chunk save if the block is modified
+    public BlockState getPlacementState(ItemPlacementContext ctx) {
+        BlockState state = this.getDefaultState();
+        Direction side = ctx.getSide();
+        double hitY = ctx.getHitPos().y - (double) ctx.getBlockPos().getY();
+
+        if (side == Direction.DOWN || (side != Direction.UP && hitY > 0.5)) {
+            return state.with(TYPE, SlabType.TOP);
+        } else {
+            return state.with(TYPE, SlabType.BOTTOM);
         }
     }
 }
@@ -394,7 +406,8 @@ public class ModBlockModel extends FacingBlock {
 
     return {
         ModBlocks: modBlocks,
-        ModBlockModel: modBlockModel
+        ModBlockModel: modBlockModel,
+        ModSlabBlock: modSlabBlock
     };
 }
 
