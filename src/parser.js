@@ -9,60 +9,44 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const javaModelsItemsDir = path.join(assetsDir, 'models', 'item');
     const javaBlockStatesDir = path.join(assetsDir, 'blockstates');
 
-    // console.log(JSON.stringify(blockEntry, null, 2)); DEBUG
-
-    // Access the nested "minecraft:block" object
     const blockData = blockEntry.blockJson?.["minecraft:block"];
-    if (!blockData) {
-        console.warn("Invalid blockJson structure:", blockEntry.blockJson);
-        return;
-    }
+    if (!blockData) return;
 
     const description = blockData.description || {};
     const components = blockData.components || {};
-
     const identifier = description.identifier || [];
-    const geometryRef = components['minecraft:geometry'] || blockEntry.geometryRef || null;
-    const geoJson = blockEntry.geoJson || null;
-
-    const permutations = blockData.permutations || 'unknown_block';
+    const permutations = blockData.permutations || [];
     const traits = description.traits || {};
-
-    const entryForGeneration = {
-        id: identifier,
-        geometryRef,
-        geoJson,
-        material_instances: components['minecraft:material_instances'] || {}
-    };
-
-    if (description.traits) {
-        entryForGeneration.traits = description.traits;
-    }
+    const materialInstances = components['minecraft:material_instances'] || {};
 
     blockList.push(blockEntry);
 
-    if (geometryRef && geoJson) {
-        await generateBlockModel(
-            entryForGeneration,
-            javaModelsBlocksDir,
-            MODID,
-            ver
-        );
-        await generateBlockStates(
-            identifier,
-            permutations,
-            traits,
-            javaBlockStatesDir,
-            MODID
-        )
-        await createItem(
-            identifier,
-            javaModelsItemsDir,
-            MODID
-        )
-    }
-}
+    const geometryRef = components['minecraft:geometry'] || blockEntry.geometryRefs?.[0] || null;
+    const geoJson = geometryRef ? blockEntry.geoJsonMap?.[geometryRef] || null : null;
 
+    if (geometryRef && geoJson) {
+        const entryForGeneration = {
+            id: identifier,
+            geometryRef,
+            geoJson,
+            material_instances: materialInstances,
+            traits
+        };
+        await generateBlockModel(entryForGeneration, javaModelsBlocksDir, MODID, ver);
+    }
+
+    const blockStatesPermutations = permutations.map(p => ({
+        condition: p.condition,
+        components: {
+            ...p.components,
+            'minecraft:geometry': p.components?.['minecraft:geometry'] || geometryRef
+        }
+    }));
+
+    await generateBlockStates(identifier, blockStatesPermutations, traits, javaBlockStatesDir, MODID);
+    await createItem(identifier, javaModelsItemsDir, MODID);
+}
+   
 // Handles conversion of lang files
 async function convertLangFile(langFileContent) {
     const lines = langFileContent.split('\n');
@@ -105,59 +89,37 @@ async function createItem(identifier, javaModelsItemsDir, MODID) {
     }
 }
 
-async function generateBlockStates(identifier, perm, traits, javaBlockStatesDir, MODID) {
+async function generateBlockStates(identifier, permutations, traits, javaBlockStatesDir, MODID) {
     const blockName = identifier.split(":")[1];
     const outFile = path.join(javaBlockStatesDir, `${blockName}.json`);
 
     const variants = {};
-    const yOffset = traits?.["minecraft:placement_direction"]?.y_rotation_offset || 0;
+    const facingToY = { north: 180, south: 0, west: 90, east: 270 };
 
-    const addVariant = (variantKey, rotationArr) => {
-        const rot = bedrockRotationToJava(rotationArr || [], yOffset);
-        variants[variantKey] = {
-            model: `${MODID}:block/${blockName}`,
-            ...(rot.x ? { x: rot.x } : {}),
-            ...(rot.y ? { y: rot.y } : {}),
-            ...(rot.z ? { z: rot.z } : {})
-        };
+    const addVariant = (variantKey, useY = false) => {
+        const variant = { model: `${MODID}:block/${blockName}` };
+        if (useY) {
+            const match = variantKey.match(/facing=(north|south|west|east)/);
+            if (match) variant.y = facingToY[match[1]];
+        }
+        variants[variantKey] = variant;
     };
 
-    if (!Array.isArray(perm) || perm.length === 0 || perm === "unknown_block") {
-        // Always create facing variants for cardinal directions
-        ["east", "south", "north", "west"].forEach(dir => addVariant(`facing=${dir}`));
+    if (!Array.isArray(permutations) || permutations.length === 0 || permutations === "unknown_block") {
+        ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
     } else {
-        for (const p of perm) {
-            const conditions = parseCondition(p.condition || "");
-            if (!conditions.length) continue;
-
-            const rotationArr = p.components?.["minecraft:transformation"]?.rotation || [];
-            const variantParts = [];
-
-            for (const { key, value } of conditions) {
-                if (key === "cardinal_direction" || key === "facing_direction") {
-                    variantParts.push(`facing=${value}`);
-                } else if (key === "block_face") {
-                    if (value === "east" || value === "west") variantParts.push("axis=x");
-                    else if (value === "up" || value === "down") variantParts.push("axis=y");
-                    else if (value === "north" || value === "south") variantParts.push("axis=z");
-                } else if (key === "vertical_half") {
-                    variantParts.push(`type=${value}`);
-                } else if (key === "waterlogged") {
-                    variantParts.push(`waterlogged=${value}`);
-                }
-            }
-
-            const variantKey = variantParts.join(",");
-            addVariant(variantKey, rotationArr);
+        for (const perm of permutations) {
+            const condition = perm.condition || "";
+            const match = condition.match(/q\.block_state\('minecraft:cardinal_direction'\)\s*==\s*'(\w+)'/);
+            if (!match) continue;
+            addVariant(`facing=${match[1]}`, true);
         }
-
         if (Object.keys(variants).length === 0) {
-            ["east", "south", "north", "west"].forEach(dir => addVariant(`facing=${dir}`));
+            ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
         }
     }
 
     const blockStateJson = { variants };
-
     await fs.mkdir(javaBlockStatesDir, { recursive: true });
     await fs.writeFile(outFile, JSON.stringify(blockStateJson, null, 2));
 }
@@ -167,50 +129,53 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     const blockId = blockEntry.id;
     const blockName = blockId.includes(':') ? blockId.split(':')[1] : blockId;
 
-    // Prepare textures
     const textures = {};
-    let textureIndex = 0;
-    if (blockEntry.material_instances) {
-        const mat = blockEntry.material_instances['*'] || {};
-        if (mat.texture) textures[`${textureIndex}`] = `${MODID}:block/${mat.texture}`;
-        for (const face of ['up', 'down', 'north', 'south', 'east', 'west']) {
-            if (mat[face]) {
-                textures[`${textureIndex}`] = `${MODID}:block/${mat[face]}`;
-            }
+    const materialInstances = blockEntry.material_instances
+        || blockEntry.blockJson?.["minecraft:block"]?.components?.["minecraft:material_instances"]
+        || {};
+
+    if (materialInstances["*"]?.texture) {
+        textures["0"] = `${MODID}:block/${materialInstances["*"].texture}`;
+    }
+    for (const face of ["up", "down", "north", "south", "east", "west"]) {
+        if (materialInstances[face]?.texture) {
+            textures[face] = `${MODID}:block/${materialInstances[face].texture}`;
         }
     }
 
-    // Convert geometry
-    let blockJson;
-    if (blockEntry.geoJson && blockEntry.geometryRef) {
-        blockJson = await convertBedrockGeometryToJava(blockEntry.geoJson, textures);
-    } else {
-        blockJson = await getDefaultGeometry(blockName, textures);
+    // Pick the first permutation geometry as the core model
+    let coreGeometry = blockEntry.geoJson || null;
+    if (blockEntry.geometries && blockEntry.geometries.length > 0) {
+        coreGeometry = blockEntry.geometries[0].geometry;
     }
 
-    // Wrap for final format
+    const blockJson = coreGeometry
+        ? await convertBedrockGeometryToJava(
+            coreGeometry,
+            textures,
+            Object.fromEntries(Object.keys(textures).map(k => [k, `#${k}`]))
+        )
+        : await getDefaultGeometry(blockName, textures);
+
     const finalJson = {
         format_version: ver,
         credit: "Made with PackIt2Fabric",
-        parent: "block/cube_all",
+        parent: "block/block",
         texture_size: blockJson?.texture_size || [16, 16],
-        textures: textures,
+        textures,
         elements: blockJson?.elements || [],
         groups: blockJson?.groups || []
     };
 
     const blockFilePath = path.join(javaModelsBlocksDir, `${blockName}.json`);
-    try {
-        await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
-        const jsonStr = formatJSONInline(finalJson, '\t');
-        await fs.promises.writeFile(blockFilePath, jsonStr, 'utf8');
-    } catch (err) {
-        console.error(`Failed to save block JSON for ${blockName}:`, err);
-    }
+    await fs.promises.mkdir(javaModelsBlocksDir, { recursive: true });
+    await fs.promises.writeFile(blockFilePath, formatJSONInline(finalJson, '\t'), 'utf8');
 }
 
-async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
+async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey = {}) {
     if (!bedrockGeometry) return null;
+
+    let vParent = "block/block"
 
     let geometryObj = null;
     if (Array.isArray(bedrockGeometry['minecraft:geometry'])) {
@@ -218,8 +183,10 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
     }
     if (!geometryObj) {
         console.warn("No valid geometry object found:", bedrockGeometry);
-        return { parent: "block/cube_all", textures, texture_size: [16,16], elements: [], groups: [] };
+        return { parent: vParent, textures, texture_size: [16,16], elements: [], groups: [] };
     }
+
+    // console.log(textures) DEBUG
 
     const desc = geometryObj.description || {};
     const texW = desc?.texture_width ?? 16;
@@ -235,7 +202,6 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         let [x1, y1] = uvPxToJava(u, v);
         let [x2, y2] = uvPxToJava(u + w, v + h);
 
-        // Handle negative UVs (flips)
         if (w < 0) [x1, x2] = [x2, x1];
         if (h < 0) [y1, y2] = [y2, y1];
 
@@ -246,18 +212,16 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         const allowed = [-45, -22.5, 0, 22.5, 45];
         let closest = allowed[0];
         let minDiff = Math.abs(angle - closest);
-
         for (const val of allowed) {
             const diff = Math.abs(angle - val);
-            if (diff < minDiff) {
-                closest = val;
-                minDiff = diff;
+            if (diff < minDiff) { 
+                closest = val; minDiff = diff;
             }
         }
         return closest;
     }
 
-    const buildFaces = (cube) => {
+    const buildFaces = (cube, faceToKeyLocal = {}, texW = 16, texH = 16) => {
         const faces = {};
         const faceList = ['north','south','east','west','up','down'];
         const defaultSizes = {
@@ -270,19 +234,40 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         };
 
         for (const face of faceList) {
-            if (!cube.uv || !cube.uv[face]) continue; // only add if defined
+            if (!cube.uv || !cube.uv[face]) continue;
+
             const def = cube.uv[face];
             let uvBox;
+
+            // Determine UV box
             if (Array.isArray(def.uv) && Array.isArray(def.uv_size)) {
-                uvBox = mapUvBox(def);
+                uvBox = mapUvBox(def, texW, texH);
             } else {
-                // use cube-level UV and default face size
                 const [u,v] = cube.uv[face]?.uv || cube.uv;
                 const [w,h] = defaultSizes[face];
-                uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] });
+                uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] }, texW, texH);
             }
-            faces[face] = { uv: uvBox, texture: "#0" };
+
+            // Flip faces as required
+            if (face === "up") {
+                uvBox = [uvBox[2], uvBox[3], uvBox[0], uvBox[1]];
+            } else if (face === "down") {
+                uvBox = [uvBox[0], uvBox[1], uvBox[2], uvBox[3]]; 
+            } else if (face === "east" || face === "south") {
+                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
+            } else if (face === "west" || face === "north") {
+                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
+            }
+
+            const texIndex =
+                faceToKeyLocal[face] ||
+                (cube.faces && cube.faces[face]?.texture) ||
+                faceToKeyLocal['*'] ||
+                "#0";
+
+            faces[face] = { uv: uvBox, texture: texIndex };
         }
+
         return faces;
     };
 
@@ -304,16 +289,15 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
 
         const axes = ['x', 'y', 'z'];
         let maxIndex = total.reduce(
-            (maxIdx, val, idx, arr) => Math.abs(val) > Math.abs(arr[maxIdx]) ? idx : maxIdx,
-            0
+        (maxIdx, val, idx, arr) => Math.abs(val) > Math.abs(arr[maxIdx]) ? idx : maxIdx,
+        0
         );
 
-        let rawAngle = total[maxIndex]; // preserve sign
-        let clampedAngle = clampJavaAngle(rawAngle); // second param: keepSign
+        let rawAngle = total[maxIndex];
+        let clampedAngle = clampJavaAngle(rawAngle);
 
-        // Special case for "no rotation" — force y axis and default origin
         if (Math.abs(total[0]) < 1e-6 && Math.abs(total[1]) < 1e-6 && Math.abs(total[2]) < 1e-6) {
-            return { axis: 'y', angle: 0, origin: [8, 0, 8] };
+        return { axis: 'y', angle: 0, origin: [8, 0, 8] };
         }
 
         return { axis: axes[maxIndex], angle: clampedAngle, origin: null };
@@ -328,7 +312,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
     const elements = [];
     const groups = [];
     const bones = geometryObj.bones || [];
-    let colorCounter = 0; // increment per group
+    let colorCounter = 0;
 
     for (const bone of bones) {
         const boneRot = Array.isArray(bone.rotation) ? bone.rotation : [0, 0, 0];
@@ -350,8 +334,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
             const merged = mergeRotations(boneRot, cubeRot);
             const origin = merged.origin || chooseOrigin(cube, bone, from, to);
 
-            // Always include rotation before faces
-            const faces = buildFaces(cube);
+            const faces = buildFaces(cube, faceToKey);
             const element = {
                 name: bone.name || 'cube',
                 from,
@@ -372,7 +355,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures) {
         });
     }
 
-    return { parent: "block/cube_all", textures, texture_size: [texW,texH], elements, groups };
+    return { parent: vParent, textures, texture_size: [texW,texH], elements, groups };
 }
 
 async function getDefaultGeometry(textures) {

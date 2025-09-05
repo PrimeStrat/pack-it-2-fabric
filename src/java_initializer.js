@@ -121,6 +121,7 @@ task printSourceSets {
  */
 function generateModInitializer(MODID, basePackage) {
     return `
+import ${basePackage}.block.BlockData;
 import ${basePackage}.block.ModBlockList;
 import ${basePackage}.block.ModBlocks;
 import ${basePackage}.item.ModItems;
@@ -181,6 +182,7 @@ public class ${MODID.toUpperCase()}Client implements ClientModInitializer {
                         BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getCutout());
                         break;
                     default:
+                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getSolid());
                         break;
                 }
             }
@@ -402,7 +404,9 @@ public class ModBlockModel extends FacingBlock {
  */
 function generateBlockListJavaFile(blockEntries) {
     const serializedBlocks = blockEntries.map(entry => {
-        const id = entry.id ?? entry.blockJson?.["minecraft:block"]?.description?.identifier ?? "unknown";
+        let id = entry.id ?? entry.blockJson?.["minecraft:block"]?.description?.identifier ?? "unknown";
+        if (id.includes(":")) {
+            id = id.split(":")[1];
 
         const components = entry.blockJson?.["minecraft:block"]?.components ?? {};
 

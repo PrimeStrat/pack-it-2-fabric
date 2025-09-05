@@ -390,8 +390,8 @@ async function promptUser(question) {
 
 // Search functions
 async function collectBedrockBlocks(ADDON_ASSETS) {
-    const blocksData = {}; // { blockId: { blockJson, geometryRef, geoJson } }
-    const geometryMap = {}; // geometryIdentifier -> geoJson
+    const blocksData = {};
+    const geometryMap = {};
 
     const blockFolders = await findBlockModelFolders(ADDON_ASSETS);
     if (blockFolders.length === 0) {
@@ -414,44 +414,64 @@ async function collectBedrockBlocks(ADDON_ASSETS) {
                 continue;
             }
 
-            // Detect geometry JSON by content, not filename
+            const isBlockJson = !!jsonData['minecraft:block'];
             const geoArray = jsonData['minecraft:geometry'];
-            if (Array.isArray(geoArray) && geoArray[0]?.description?.identifier?.startsWith("geometry")) {
-                const geoIdentifier = geoArray[0].description.identifier;
-                geometryMap[geoIdentifier] = jsonData;
-                continue; // skip adding to blocksData
+
+            if (Array.isArray(geoArray) && !isBlockJson) {
+                const geoIdentifier = geoArray[0]?.description?.identifier;
+                if (geoIdentifier && geoIdentifier.startsWith("geometry")) {
+                    geometryMap[geoIdentifier] = jsonData;
+                    continue;
+                }
             }
 
-            // Otherwise, treat as block JSON
             const blockId = jsonData?.description?.identifier || path.basename(file, '.json');
             blocksData[blockId] = blocksData[blockId] || {};
             blocksData[blockId].blockJson = jsonData;
+            blocksData[blockId].geometryRefs = blocksData[blockId].geometryRefs || [];
 
-            const geometryRef = jsonData?.components?.['minecraft:geometry'];
-            if (geometryRef) {
-                blocksData[blockId].geometryRef = geometryRef;
+            let topGeoRef = jsonData?.components?.['minecraft:geometry'];
+
+            if (!topGeoRef) {
+                topGeoRef = jsonData?.["minecraft:block"]?.components?.["minecraft:geometry"];
+            }
+
+            if (topGeoRef) {
+                blocksData[blockId].geometryRefs.push(topGeoRef);
+                if (!geometryMap[topGeoRef]) {
+                    geometryMap[topGeoRef] = null; 
+                }
+            }
+
+            const permutations = jsonData?.["minecraft:block"]?.permutations || [];
+            for (const perm of permutations) {
+                const permGeoRef = perm.components?.["minecraft:geometry"];
+                if (permGeoRef) {
+                    blocksData[blockId].geometryRefs.push(permGeoRef);
+                    if (!geometryMap[permGeoRef]) {
+                        geometryMap[permGeoRef] = null;
+                    }
+                }
             }
         }
     }
 
-    // Attach the correct geoJson for each block
     for (const [blockId, entry] of Object.entries(blocksData)) {
-        const blockComponents = entry.blockJson?.["minecraft:block"]?.components;
-        let geometryName = blockComponents?.["minecraft:geometry"] || entry.geometryRef;
-
-        // Fallback to default geometry if none exists
-        if (!geometryName) {
-            geometryName = "geometry.block";
+        entry.geometryRefs = [...new Set(entry.geometryRefs)];
+        entry.geoJsonMap = {};
+        for (const geoRef of entry.geometryRefs) {
+            entry.geoJsonMap[geoRef] = geometryMap[geoRef] || null;
         }
 
-        if (geometryMap[geometryName]) {
-            entry.geoJson = geometryMap[geometryName];
-        } else {
-            entry.geoJson = null;
-        }
+        // Debug
+        /**console.log(`\n=== Block Debug: ${blockId} ===`);
+        console.log("Top-level geometry refs:", entry.geometryRefs);
+        const permRefs = entry.blockJson?.["minecraft:block"]?.permutations?.map(p => p.components?.["minecraft:geometry"]);
+        console.log("Permutation geometry refs:", permRefs);
+        console.log("geoJsonMap keys:", Object.keys(entry.geoJsonMap));**/
     }
 
-    console.log(`Collected ${Object.keys(blocksData).length} blocks and ${Object.keys(geometryMap).length} geometries`);
+    console.log(`\nCollected ${Object.keys(blocksData).length} blocks and ${Object.keys(geometryMap).length} geometries`);
     return blocksData;
 }
 
