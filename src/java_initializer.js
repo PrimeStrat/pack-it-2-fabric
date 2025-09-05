@@ -168,23 +168,25 @@ import net.minecraft.block.Block;
 public class ${MODID.toUpperCase()}Client implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
-        // Match BlockData with registered blocks
-        for (int i = 0; i < ModBlockList.BLOCK_LIST.size(); i++) {
-            BlockData data = ModBlockList.BLOCK_LIST.get(i);
-            Block block = ModBlocks.${MODID.toUpperCase()}_BLOCKS.get(i);
+        int size = Math.min(ModBlockList.BLOCK_LIST.size(), ModBlocks.WMCT_BLOCKS.size());
 
-            if (data.getRenderMethod() != null) {
-                switch (data.getRenderMethod()) {
-                    case "blend":
-                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getTranslucent());
-                        break;
-                    case "alpha_test":
-                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getCutout());
-                        break;
-                    default:
-                        BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getSolid());
-                        break;
-                }
+        for (int i = 0; i < size; i++) {
+            BlockData data = ModBlockList.BLOCK_LIST.get(i);
+            Block block = ModBlocks.WMCT_BLOCKS.get(i);
+
+            String method = data.getRenderMethod();
+            if (method == null) method = "solid"; // default
+
+            switch (method) {
+                case "blend":
+                    BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getTranslucent());
+                    break;
+                case "alpha_test":
+                    BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getCutout());
+                    break;
+                default:
+                    BlockRenderLayerMap.INSTANCE.putBlock(block, RenderLayer.getSolid());
+                    break;
             }
         }
     }
@@ -298,10 +300,7 @@ public class ModBlocks {
             settings.luminance(state -> data.getLightEmission());
         }
 
-        if (data.getLightDampening() > 0) {
-            settings.nonOpaque();
-        }
-
+        settings.nonOpaque();
         settings.noBlockBreakParticles();
 
         Block block = new ModBlockModel(settings);

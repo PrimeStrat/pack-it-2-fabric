@@ -160,7 +160,7 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
     const finalJson = {
         format_version: ver,
         credit: "Made with PackIt2Fabric",
-        parent: "block/block",
+        parent: "block/cube_all",
         texture_size: blockJson?.texture_size || [16, 16],
         textures,
         elements: blockJson?.elements || [],
@@ -175,7 +175,7 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver) {
 async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey = {}) {
     if (!bedrockGeometry) return null;
 
-    let vParent = "block/block"
+    let vParent = "block/cube_all"
 
     let geometryObj = null;
     if (Array.isArray(bedrockGeometry['minecraft:geometry'])) {
