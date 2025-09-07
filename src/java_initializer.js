@@ -304,6 +304,10 @@ public class ModBlocks {
         settings.nonOpaque();
         settings.noBlockBreakParticles();
 
+        if (data.getBlockGenType() == "flower" || data.getBlockGenType() == "zeroCol") {
+            settings.noCollision();
+        }
+
         Block block;
 
         switch (data.getBlockGenType()) {
@@ -313,7 +317,6 @@ public class ModBlocks {
             case "pillar":
                 block = new PillarBlock(settings);
                 break;
-            case "facing":
             default:
                 block = new ModBlockModel(settings);
                 break;
@@ -448,6 +451,48 @@ function generateBlockListJavaFile(blockEntries) {
         const hasSide = mainMat?.texture !== undefined;
         if (hasUp && hasDown && hasSide && id.includes("pillar")) {
             blockGenType = "pillar";
+        }
+
+        const geometryRef = components['minecraft:geometry'] || entry.geometryRefs?.[0] || null;
+        const geoJson = geometryRef ? entry.geoJsonMap?.[geometryRef] || null : null;
+
+        if (geoJson) {
+            const geometries = geoJson?.['minecraft:geometry'] ?? [];
+            let allSmall = true;    
+            let hasThinPlane = false;    
+            let allPlanes45 = true;       
+            let maxYSpread = 0;
+            let isFullColumn = false
+
+            for (const geometry of geometries) {
+                for (const bone of geometry.bones ?? []) {
+                    for (const cube of bone.cubes ?? []) {
+                        if (!Array.isArray(cube.size) || !Array.isArray(cube.origin)) continue;
+                        const [sx, sy, sz] = cube.size;
+                        isFullColumn = (sx >= 3 && sz >= 3 && sy >= 3);
+
+                        maxYSpread = Math.max(maxYSpread, sy);
+                        if (sx >= 3 || sy >= 3 || sz >= 3) allSmall = false;
+                        if ((sx < 3 || sz < 3) && sy >= 3) hasThinPlane = true;
+                        let yRot = 0;
+                        if (Array.isArray(cube.rotation)) {
+                            yRot = cube.rotation[1] ?? 0;
+                        } else if (cube.rotation?.axis === 'y' && typeof cube.rotation.angle === 'number') {
+                            yRot = cube.rotation.angle;
+                        }
+
+                        if (yRot !== 45 && yRot !== -45) allPlanes45 = false;
+                    }
+                }
+            }
+
+            if (maxYSpread < 3) {
+                blockGenType = "zeroCol";
+            }
+
+            else if (hasThinPlane && allPlanes45) {
+                blockGenType = "flower";
+            }
         }
 
         const lightDamp = components["minecraft:light_dampening"] ?? 0;
