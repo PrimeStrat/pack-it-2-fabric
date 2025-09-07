@@ -39,6 +39,46 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const geometryRef = components['minecraft:geometry'] || blockEntry.geometryRefs?.[0] || null;
     const geoJson = geometryRef ? blockEntry.geoJsonMap?.[geometryRef] || null : null;
 
+    if (geoJson) {
+        const geometries = geoJson?.['minecraft:geometry'] ?? [];
+        let allSmall = true;    
+        let hasThinPlane = false;    
+        let allPlanes45 = true;       
+        let maxYSpread = 0;
+        let isFullColumn = false
+
+        for (const geometry of geometries) {
+            for (const bone of geometry.bones ?? []) {
+                for (const cube of bone.cubes ?? []) {
+                    if (!Array.isArray(cube.size) || !Array.isArray(cube.origin)) continue;
+                    const [sx, sy, sz] = cube.size;
+                    const [ox, oy, oz] = cube.origin;
+                    isFullColumn = (sx >= 3 && sz >= 3 && sy >= 3);
+
+                    maxYSpread = Math.max(maxYSpread, sy);
+                    if (sx >= 3 || sy >= 3 || sz >= 3) allSmall = false;
+                    if ((sx < 3 || sz < 3) && sy >= 3) hasThinPlane = true;
+                    let yRot = 0;
+                    if (Array.isArray(cube.rotation)) {
+                        yRot = cube.rotation[1] ?? 0;
+                    } else if (cube.rotation?.axis === 'y' && typeof cube.rotation.angle === 'number') {
+                        yRot = cube.rotation.angle;
+                    }
+
+                    if (yRot !== 45 && yRot !== -45) allPlanes45 = false;
+                }
+            }
+        }
+
+        if (maxYSpread < 3) {
+            blockGenType = "zeroCol";
+        }
+
+        else if (hasThinPlane && allPlanes45) {
+            blockGenType = "flower";
+        }
+    }
+
     if (geometryRef && geoJson) {
         const entryForGeneration = {
             id: identifier,
@@ -192,7 +232,8 @@ async function generateBlockModel(blockEntry, javaModelsBlocksDir, MODID, ver, b
         ? await convertBedrockGeometryToJava(
             coreGeometry,
             textures,
-            Object.fromEntries(Object.keys(textures).map(k => [k, `#${k}`]))
+            Object.fromEntries(Object.keys(textures).map(k => [k, `#${k}`])),
+            blockGenType
         )
         : await getDefaultGeometry(blockName, textures);
 
@@ -313,36 +354,53 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
         };
 
         for (const face of faceList) {
-            if (!cube.uv || !cube.uv[face]) continue;
-
-            const def = cube.uv[face];
             let uvBox;
-
-            // Determine UV box
-            if (Array.isArray(def.uv) && Array.isArray(def.uv_size)) {
-                uvBox = mapUvBox(def, texW, texH);
-            } else {
-                const [u,v] = cube.uv[face]?.uv || cube.uv;
-                const [w,h] = defaultSizes[face];
-                uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] }, texW, texH);
-            }
-
-            // Flip faces as required
-            if (face === "up") {
-                uvBox = [uvBox[2], uvBox[3], uvBox[0], uvBox[1]];
-            } else if (face === "down") {
-                uvBox = [uvBox[0], uvBox[1], uvBox[2], uvBox[3]]; 
-            } else if (face === "east" || face === "south") {
-                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
-            } else if (face === "west" || face === "north") {
-                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
-            }
-
             const texIndex =
                 faceToKeyLocal[face] ||
                 (cube.faces && cube.faces[face]?.texture) ||
                 faceToKeyLocal['*'] ||
                 "#0";
+
+            if (blockGenType === "flower") {
+                const baseFace = Object.keys(cube.uv || {})[0] || 'north';
+                const baseUv = cube.uv[baseFace];
+                const [u,v] = baseUv?.uv || baseUv;
+                const [w,h] = defaultSizes[baseFace] || [16,16];
+                const mappedUv = mapUvBox({ uv: [u,v], uv_size: [w,h] }, texW, texH);
+
+                if (['north','south','east','west'].includes(face)) {
+                    uvBox = mappedUv;
+                } else {
+                    const def = cube.uv?.[face];
+                    if (def) {
+                        if (Array.isArray(def.uv) && Array.isArray(def.uv_size)) {
+                            uvBox = mapUvBox(def, texW, texH);
+                        } else {
+                            const [u2, v2] = def.uv || [0, 0];
+                            const [w2, h2] = defaultSizes[face];
+                            uvBox = mapUvBox({ uv: [u2, v2], uv_size: [w2, h2] }, texW, texH);
+                        }
+                    } else {
+                        uvBox = mappedUv;
+                    }
+                }
+            } else {
+                const def = cube.uv[face];
+                if (!def) continue;
+                if (Array.isArray(def?.uv) && Array.isArray(def?.uv_size)) {
+                    uvBox = mapUvBox(def, texW, texH);
+                } else {
+                    const [u,v] = def?.uv || [0,0];
+                    const [w,h] = defaultSizes[face];
+                    uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] }, texW, texH);
+                }
+            }
+
+            if (face === "up") {
+                uvBox = [uvBox[2], uvBox[3], uvBox[0], uvBox[1]];
+            } else if (face === "south") {
+                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
+            }
 
             faces[face] = { uv: uvBox, texture: texIndex };
         }
@@ -361,31 +419,71 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
         return [from,[fix(0),fix(1),fix(2)]];
     };
 
-    const mergeRotations = (boneRot, cubeRot) => {
+    const mergeRotations = (boneRot, cubeRot, cubeOrigin, cubeSize, bonePivot) => {
         const br = boneRot || [0, 0, 0];
         const cr = cubeRot || [0, 0, 0];
         const total = [br[0] + cr[0], br[1] + cr[1], br[2] + cr[2]];
 
         const axes = ['x', 'y', 'z'];
         let maxIndex = total.reduce(
-        (maxIdx, val, idx, arr) => Math.abs(val) > Math.abs(arr[maxIdx]) ? idx : maxIdx,
-        0
+            (maxIdx, val, idx, arr) => Math.abs(val) > Math.abs(arr[maxIdx]) ? idx : maxIdx,
+            0
         );
 
         let rawAngle = total[maxIndex];
         let clampedAngle = clampJavaAngle(rawAngle);
 
+        let origin;
         if (Math.abs(total[0]) < 1e-6 && Math.abs(total[1]) < 1e-6 && Math.abs(total[2]) < 1e-6) {
-        return { axis: 'y', angle: 0, origin: [8, 0, 8] };
+            origin = [
+                cubeOrigin[0] < 0 ? cubeOrigin[0] + cubeSize[0]/2 : cubeOrigin[0] + cubeSize[0]/2,
+                bonePivot?.[1] ?? 0,
+                cubeOrigin[2] < 0 ? cubeOrigin[2] + cubeSize[2]/2 : cubeOrigin[2] + cubeSize[2]/2
+            ];
         }
 
-        return { axis: axes[maxIndex], angle: clampedAngle, origin: null };
+        return { axis: axes[maxIndex], angle: clampedAngle, origin };
     };
 
     const chooseOrigin = (cube, bone, from, to) => {
-        if (Array.isArray(cube.pivot)) return cube.pivot.slice(0,3).map((v,i)=>i!==1?v+8:v);
-        if (Array.isArray(bone?.pivot)) return bone.pivot.slice(0,3).map((v,i)=>i!==1?v+8:v);
-        return [(from[0]+to[0])/2,(from[1]+to[1])/2,(from[2]+to[2])/2];
+        if (Array.isArray(cube.pivot)) return cube.pivot.slice(0,3); 
+        if (Array.isArray(bone?.pivot)) return bone.pivot.slice(0,3);
+
+        return [
+            (from[0] + to[0]) / 2,
+            (from[1] + to[1]) / 2,
+            (from[2] + to[2]) / 2
+        ];
+    };
+
+    const shouldConvertCube = (cube, bone, visibleOffset = [0, 0, 0]) => {
+        if (cube.pivot) return false;
+        if (cube.rotation && cube.rotation.some(r => r !== 0)) return false;
+
+        if (bone.name !== "root") return false;
+
+        const pivot = bone.pivot || [0, 0, 0];
+        const minX = cube.origin[0] + pivot[0] + visibleOffset[0];
+        const minY = cube.origin[1] + pivot[1] + visibleOffset[1];
+        const minZ = cube.origin[2] + pivot[2] + visibleOffset[2];
+
+        const maxX = minX + (cube.size[0] || 0);
+        const maxY = minY + (cube.size[1] || 0);
+        const maxZ = minZ + (cube.size[2] || 0);
+
+        return minX < 0 || minZ < 0 || minY < 0 || maxX < 0 || maxZ < 0 || maxY < 0;
+    };
+
+    const convertOriginSize = (origin, size) => {
+        const fromX = origin[0] + Math.abs(Math.min(origin[0], 0));
+        const fromY = origin[1];
+        const fromZ = origin[2] + Math.abs(Math.min(origin[2], 0));
+
+        const toX = fromX + size[0];
+        const toY = fromY + size[1];
+        const toZ = fromZ + size[2];
+
+        return { from: [fromX, fromY, fromZ], to: [toX, toY, toZ] };
     };
 
     const elements = [];
@@ -404,16 +502,21 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
             const [ox, oy, oz] = cube.origin;
             const [sx, sy, sz] = cube.size;
             let from = [ox + 8, oy, oz + 8];
-            let to   = [ox + sx + 8, oy + sy, oz + sz + 8];
+            let to = [ox + sx + 8, oy + sy, oz + sz + 8];
 
             ({ from, to } = applyInflate(from, to, typeof cube.inflate === 'number' ? cube.inflate : 0));
             [from, to] = epsilonizeIfNeeded(from, to);
 
             const cubeRot = Array.isArray(cube.rotation) ? cube.rotation : [0, 0, 0];
-            const merged = mergeRotations(boneRot, cubeRot);
-            const origin = merged.origin || chooseOrigin(cube, bone, from, to);
+            const merged = mergeRotations(boneRot, cubeRot, cube.origin, cube.size, bonePivot);
+            let origin = merged.origin || chooseOrigin(cube, bone, from, to);
 
-            const faces = buildFaces(cube, faceToKey);
+            if (blockGenType == "flower"){
+                origin = [to[2], from[1], to[2]]
+            }
+
+            const faces = buildFaces(cube, faceToKey, texW, texH);
+
             const element = {
                 name: bone.name || 'cube',
                 from,
@@ -492,21 +595,6 @@ function formatJSONInline(data, indent = '\t', level = 0, parentKey = '') {
     }
 
     return JSON.stringify(data);
-}
-
-function parseCondition(condition) {
-    const matches = [...condition.matchAll(/'minecraft:(.*?)'\)\s*==\s*'(\w+)'/g)];
-    return matches.map(([ , key, value ]) => ({ key, value }));
-}
-
-function bedrockRotationToJava(rotationArr, yOffset = 0) {
-    const [x = 0, y = 0, z = 0] = rotationArr;
-    let rot = { x, y, z };
-    if (yOffset) {
-        rot.y = (rot.y + yOffset) % 360;
-        if (rot.y > 180) rot.y -= 360;
-    }
-    return rot;
 }
 
 module.exports = {
