@@ -318,7 +318,6 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
             const def = cube.uv[face];
             let uvBox;
 
-            // Determine UV box
             if (Array.isArray(def.uv) && Array.isArray(def.uv_size)) {
                 uvBox = mapUvBox(def, texW, texH);
             } else {
@@ -327,16 +326,9 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
                 uvBox = mapUvBox({ uv: [u,v], uv_size: [w,h] }, texW, texH);
             }
 
-            // Flip faces as required
             if (face === "up") {
                 uvBox = [uvBox[2], uvBox[3], uvBox[0], uvBox[1]];
-            } else if (face === "down") {
-                uvBox = [uvBox[0], uvBox[1], uvBox[2], uvBox[3]]; 
-            } else if (face === "east" || face === "south") {
-                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
-            } else if (face === "west" || face === "north") {
-                uvBox = [uvBox[2], uvBox[1], uvBox[0], uvBox[3]];
-            }
+            } 
 
             const texIndex =
                 faceToKeyLocal[face] ||
@@ -399,25 +391,31 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
         const boneChildren = [];
 
         if (!Array.isArray(bone.cubes)) continue;
+
         for (const cube of bone.cubes) {
             if (!Array.isArray(cube.origin) || !Array.isArray(cube.size)) continue;
             const [ox, oy, oz] = cube.origin;
             const [sx, sy, sz] = cube.size;
-            let from = [ox + 8, oy, oz + 8];
-            let to   = [ox + sx + 8, oy + sy, oz + sz + 8];
 
-            ({ from, to } = applyInflate(from, to, typeof cube.inflate === 'number' ? cube.inflate : 0));
-            [from, to] = epsilonizeIfNeeded(from, to);
+            const offsetX = ox < 0 ? -ox : 0;
+            const offsetZ = oz < 0 ? -oz : 0;
+            const from = [ox + offsetX, oy, oz + offsetZ];
+            const to   = [ox + sx + offsetX, oy + sy, oz + sz + offsetZ];
+
+            let adjustedFrom = from.slice();
+            let adjustedTo = to.slice();
+            ({ from: adjustedFrom, to: adjustedTo } = applyInflate(adjustedFrom, adjustedTo, typeof cube.inflate === 'number' ? cube.inflate : 0));
+            [adjustedFrom, adjustedTo] = epsilonizeIfNeeded(adjustedFrom, adjustedTo);
 
             const cubeRot = Array.isArray(cube.rotation) ? cube.rotation : [0, 0, 0];
             const merged = mergeRotations(boneRot, cubeRot);
-            const origin = merged.origin || chooseOrigin(cube, bone, from, to);
+            const origin = merged.origin || chooseOrigin(cube, bone, adjustedFrom, adjustedTo);
 
             const faces = buildFaces(cube, faceToKey);
             const element = {
                 name: bone.name || 'cube',
-                from,
-                to,
+                from: adjustedFrom,
+                to: adjustedTo,
                 rotation: { angle: merged.angle, axis: merged.axis, origin },
                 faces
             };
@@ -428,7 +426,7 @@ async function convertBedrockGeometryToJava(bedrockGeometry, textures, faceToKey
 
         groups.push({
             name: bone.name || 'root',
-            origin: bonePivot.map((v, i) => i !== 1 ? v + 8 : v),
+            origin: bonePivot.map((v, i) => i !== 1 ? v + 8 : v), // Y pivot remains unchanged
             color: colorCounter++,
             children: boneChildren
         });
