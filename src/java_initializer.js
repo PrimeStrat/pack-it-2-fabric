@@ -16,10 +16,11 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItems`, ModItems)
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItemGroups`, ModItemGroups)
 
-    let { ModBlocks, ModBlockModel, ModSlabBlock } = generateBlockHandler(MODID, basePackage, blockList)
+    let { ModBlocks, ModBlockModel, ModSlabBlock, ModBlockModelWaterLogged } = generateBlockHandler(MODID, basePackage, blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModSlabBlock`, ModSlabBlock)
+    await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModelWaterLogged`, ModBlockModelWaterLogged)
 
     let blockListJavaFile = generateBlockListJavaFile(blockList);
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile);
@@ -317,6 +318,9 @@ public class ModBlocks {
             case "pillar":
                 block = new PillarBlock(settings);
                 break;
+            case "waterloggable":
+                block = new ModBlockModelWaterLogged(settings);
+                break;
             default:
                 block = new ModBlockModel(settings);
                 break;
@@ -415,10 +419,79 @@ public class ModSlabBlock extends SlabBlock {
 }
 `.trim();
 
+    const modBlockModelWaterLogged = `
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockState;
+import net.minecraft.block.FacingBlock;
+import net.minecraft.block.Waterloggable;
+import net.minecraft.fluid.FluidState;
+import net.minecraft.fluid.Fluids;
+import net.minecraft.item.ItemPlacementContext;
+import net.minecraft.state.StateManager;
+import net.minecraft.state.property.BooleanProperty;
+import net.minecraft.state.property.DirectionProperty;
+import net.minecraft.state.property.Properties;
+import net.minecraft.util.BlockMirror;
+import net.minecraft.util.BlockRotation;
+import net.minecraft.util.math.Direction;
+import net.minecraft.util.math.BlockPos;
+import net.minecraft.world.WorldAccess;
+
+public class ModBlockModelWaterLogged extends FacingBlock implements Waterloggable {
+
+    public static final DirectionProperty FACING = Properties.HORIZONTAL_FACING;
+    public static final BooleanProperty WATERLOGGED = Properties.WATERLOGGED;
+
+    public ModBlockModelWaterLogged(Settings settings) {
+        super(settings);
+        this.setDefaultState(this.stateManager.getDefaultState()
+            .with(FACING, Direction.NORTH)
+            .with(WATERLOGGED, false));
+    }
+
+    @Override
+    public BlockState getPlacementState(ItemPlacementContext ctx) {
+        FluidState fluidState = ctx.getWorld().getFluidState(ctx.getBlockPos());
+        return this.getDefaultState()
+            .with(FACING, ctx.getHorizontalPlayerFacing().getOpposite())
+            .with(WATERLOGGED, fluidState.getFluid() == Fluids.WATER);
+    }
+
+    @Override
+    public BlockState rotate(BlockState state, BlockRotation rotation) {
+        return state.with(FACING, rotation.rotate(state.get(FACING)));
+    }
+
+    @Override
+    public BlockState mirror(BlockState state, BlockMirror mirror) {
+        return state.rotate(mirror.getRotation(state.get(FACING)));
+    }
+
+    @Override
+    protected void appendProperties(StateManager.Builder<Block, BlockState> builder) {
+        builder.add(FACING, WATERLOGGED);
+    }
+
+    @Override
+    public FluidState getFluidState(BlockState state) {
+        return state.get(WATERLOGGED) ? Fluids.WATER.getStill(false) : super.getFluidState(state);
+    }
+
+    @Override
+    public BlockState getStateForNeighborUpdate(BlockState state, Direction direction, BlockState neighborState, WorldAccess world, BlockPos pos, BlockPos neighborPos) {
+        if (state.get(WATERLOGGED)) {
+            world.scheduleFluidTick(pos, Fluids.WATER, Fluids.WATER.getTickRate(world));
+        }
+        return super.getStateForNeighborUpdate(state, direction, neighborState, world, pos, neighborPos);
+    }
+}
+`.trim();
+
     return {
         ModBlocks: modBlocks,
         ModBlockModel: modBlockModel,
-        ModSlabBlock: modSlabBlock
+        ModSlabBlock: modSlabBlock,
+        ModBlockModelWaterLogged: modBlockModelWaterLogged
     };
 }
 
