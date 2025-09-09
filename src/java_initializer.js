@@ -16,11 +16,10 @@ async function generateJavaSources(MODID, OUT_DIR, VER) {
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItems`, ModItems)
     await writeJavaFile(basePath, `${basePackage}.item`, `ModItemGroups`, ModItemGroups)
 
-    let { ModBlocks, ModBlockModel, ModSlabBlock, ModBlockModelWaterLogged } = generateBlockHandler(MODID, basePackage, blockList)
+    let { ModBlocks, ModBlockModel, ModSlabBlock } = generateBlockHandler(MODID, basePackage, blockList)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlocks`, ModBlocks)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModel`, ModBlockModel)
     await writeJavaFile(basePath, `${basePackage}.block`, `ModSlabBlock`, ModSlabBlock)
-    await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockModelWaterLogged`, ModBlockModelWaterLogged)
 
     let blockListJavaFile = generateBlockListJavaFile(blockList);
     await writeJavaFile(basePath, `${basePackage}.block`, `ModBlockList`, blockListJavaFile);
@@ -318,9 +317,6 @@ public class ModBlocks {
             case "pillar":
                 block = new PillarBlock(settings);
                 break;
-            case "waterloggable":
-                block = new ModBlockModelWaterLogged(settings);
-                break;
             default:
                 block = new ModBlockModel(settings);
                 break;
@@ -531,11 +527,9 @@ function generateBlockListJavaFile(blockEntries) {
 
         if (geoJson) {
             const geometries = geoJson?.['minecraft:geometry'] ?? [];
-            let allSmall = true;    
             let hasThinPlane = false;    
             let allPlanes45 = true;       
             let maxYSpread = 0;
-            let isFullColumn = false
 
             for (const geometry of geometries) {
                 for (const bone of geometry.bones ?? []) {
