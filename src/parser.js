@@ -105,17 +105,18 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     await createItem(identifier, javaModelsItemsDir, MODID);
 }
 
-async function flushChunkerMapping(){
-    fs.writeFileSync(mappingsFile, JSON.stringify(blockMappingData, null, 2));
+async function flushChunkerMapping() {
+    const output = { identifiers: blockMappingData };
+    fs.writeFileSync(mappingsFile, JSON.stringify(output, null, 2));
 }
 
 const stateMapper = (key, value) => {
     if (key === "facing") return ["minecraft:cardinal_direction", value];
     if (key === "type") return ["minecraft:vertical_half", value];
     if (key === "axis") {
-        if (value === "x") return ["minecraft:facing_direction", "east"];
-        if (value === "y") return ["minecraft:facing_direction", "up"];
-        if (value === "z") return ["minecraft:facing_direction", "north"];
+        if (value === "x") return ["minecraft:block_face", "east"];
+        if (value === "y") return ["minecraft:block_face", "up"];
+        if (value === "z") return ["minecraft:block_face", "north"];
     }
     if (key === "waterlogged") return ["waterlogged", value === "true"];
     return [key, value];
