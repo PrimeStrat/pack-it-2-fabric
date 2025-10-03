@@ -1,13 +1,16 @@
 const path = require('path');
 const fs = require('fs-extra');
 
-let blockList = []
+let blockList = [];
+let blockMappingData = [];
+let mappingsFile = "block_mappings.chunker.json";
 
 // Handles conversion of block models
 async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     const javaModelsBlocksDir = path.join(assetsDir, 'models', 'block');
     const javaModelsItemsDir = path.join(assetsDir, 'models', 'item');
     const javaBlockStatesDir = path.join(assetsDir, 'blockstates');
+    mappingsFile = path.join(assetsDir, "../../../block_mappings.chunker.json");
 
     const blockData = blockEntry.blockJson?.["minecraft:block"];
     if (!blockData) return;
@@ -101,7 +104,23 @@ async function convertBlockModel(blockEntry, assetsDir, MODID, ver) {
     await generateBlockStates(identifier, blockStatesPermutations, traits, javaBlockStatesDir, MODID, blockGenType);
     await createItem(identifier, javaModelsItemsDir, MODID);
 }
-   
+
+async function flushChunkerMapping(){
+    fs.writeFileSync(mappingsFile, JSON.stringify(blockMappingData, null, 2));
+}
+
+const stateMapper = (key, value) => {
+    if (key === "facing") return ["minecraft:cardinal_direction", value];
+    if (key === "type") return ["minecraft:vertical_half", value];
+    if (key === "axis") {
+        if (value === "x") return ["minecraft:facing_direction", "east"];
+        if (value === "y") return ["minecraft:facing_direction", "up"];
+        if (value === "z") return ["minecraft:facing_direction", "north"];
+    }
+    if (key === "waterlogged") return ["waterlogged", value === "true"];
+    return [key, value];
+};
+
 // Handles conversion of lang files
 async function convertLangFile(langFileContent) {
     const lines = langFileContent.split('\n');
@@ -144,58 +163,80 @@ async function createItem(identifier, javaModelsItemsDir, MODID) {
     }
 }
 
+// Handle block state generation
 async function generateBlockStates(identifier, permutations, traits, javaBlockStatesDir, MODID, blockGenType) {
     const blockName = identifier.split(":")[1];
     const outFile = path.join(javaBlockStatesDir, `${blockName}.json`);
-
     const variants = {};
     const facingToY = { north: 180, south: 0, west: 90, east: 270 };
-
-    // Respect y_rotation_offset if defined
-    let yRotationOffset = 0;
-    if (traits?.["minecraft:placement_direction"]?.y_rotation_offset !== undefined) {
-        yRotationOffset = traits["minecraft:placement_direction"].y_rotation_offset;
-    }
+    const yRotationOffset = traits?.["minecraft:placement_direction"]?.y_rotation_offset || 0;
 
     const addVariant = (variantKey, useY = false) => {
         const variant = { model: `${MODID}:block/${blockName}` };
-
         if (useY) {
             const match = variantKey.match(/facing=(north|south|west|east)/);
-            if (match) {
-                let baseY = facingToY[match[1]];
-                variant.y = (baseY + yRotationOffset) % 360; // apply offset
-            }
+            if (match) variant.y = (facingToY[match[1]] + yRotationOffset) % 360;
         }
         variants[variantKey] = variant;
     };
 
-    // Handle slab blockstates (only bottom and top)
     if (blockGenType === "slab") {
         variants["type=bottom"] = { model: `${MODID}:block/${blockName}` };
         variants["type=top"] = { model: `${MODID}:block/${blockName}_top` };
-    }
-    // Handle pillar blockstates
-    else if (blockGenType === "pillar") {
+    } else if (blockGenType === "pillar") {
         variants["axis=x"] = { model: `${MODID}:block/${blockName}`, x: 90, y: 90 };
-        variants["axis=y"] = { model: `${MODID}:block/${blockName}` }; // default upright
+        variants["axis=y"] = { model: `${MODID}:block/${blockName}` };
         variants["axis=z"] = { model: `${MODID}:block/${blockName}`, x: 90 };
-    }
-    // Handle facing blockstates
-    else {
+    } else {
+        const dirs = ["north", "south", "west", "east"];
         if (!Array.isArray(permutations) || permutations.length === 0 || permutations === "unknown_block") {
-            ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
+            dirs.forEach(d => addVariant(`facing=${d}`, false));
         } else {
             for (const perm of permutations) {
-                const condition = perm.condition || "";
-                const match = condition.match(/q\.block_state\('minecraft:(?:cardinal_direction|facing_direction)'\)\s*==\s*'(\w+)'/);
-                if (!match) continue;
-                addVariant(`facing=${match[1]}`, true);
+                const match = perm.condition?.match(/q\.block_state\('minecraft:(?:cardinal_direction|facing_direction)'\)\s*==\s*'(\w+)'/);
+                if (match) addVariant(`facing=${match[1]}`, true);
             }
-            if (Object.keys(variants).length === 0) {
-                ["north", "south", "west", "east"].forEach(dir => addVariant(`facing=${dir}`, false));
+            if (Object.keys(variants).length === 0) dirs.forEach(d => addVariant(`facing=${d}`, false));
+        }
+    }
+
+    const waterloggedStates = ["false", "true"];
+    const facings = ["north", "south", "west", "east"];
+    const slabTypes = ["bottom", "top"];
+    const axes = ["x", "y", "z"];
+
+    const allVariants = [];
+
+    if (blockGenType === "slab") {
+        for (const type of slabTypes) {
+            for (const water of waterloggedStates) {
+                allVariants.push({ type, waterlogged: water });
             }
         }
+    } else if (blockGenType === "pillar") {
+        for (const axis of axes) {
+            allVariants.push({ axis });
+        }
+    } else {
+        for (const facing of facings) {
+            allVariants.push({ facing });
+        }
+    }
+
+    for (const variant of allVariants) {
+        const oldStates = variant;
+        const newStates = {};
+        for (const [k, v] of Object.entries(oldStates)) {
+            const [newKey, newValue] = stateMapper(k, v);
+            newStates[newKey] = newValue;
+        }
+
+        blockMappingData.push({
+            old_identifier: identifier,
+            new_identifier: identifier,
+            old_state_values: oldStates,
+            new_state_values: newStates
+        });
     }
 
     const blockStateJson = { variants };
@@ -600,5 +641,6 @@ function formatJSONInline(data, indent = '\t', level = 0, parentKey = '') {
 module.exports = {
     convertBlockModel,
     convertLangFile,
+    flushChunkerMapping,
     blockList
 };

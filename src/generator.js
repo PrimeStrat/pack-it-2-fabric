@@ -60,6 +60,8 @@ async function generateFabricMod() {
         console.log(`No block models found at ${ADDON_ASSETS}`);
     }
 
+    await parser.flushChunkerMapping()
+
     // TEXTURES
     const javaTexturesDir = path.join(assetsDir, 'textures', 'block');
     if (await fs.pathExists(ADDON_ASSETS)) {

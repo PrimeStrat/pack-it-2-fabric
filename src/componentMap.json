@@ -1,8 +1,0 @@
-{
-  "minecraft:light_dampening": "propagatesSkylightDown",
-  "minecraft:light_emission": "luminance",
-  "minecraft:liquid_detection": [
-    "canFillWithFluid",
-    "receiveFluid"
-  ]
-}
